@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
+import Image from "next/image";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,7 +16,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Camera, Loader2, X, UserCircle, ScanLine } from "lucide-react";
+import { Camera, Loader2, X, UserCircle, ScanLine, LogOut } from "lucide-react";
 
 type Visitor = {
   id: string;
@@ -30,12 +32,17 @@ type Visitor = {
 };
 
 export default function GuardDashboard() {
+  const router = useRouter();
   const [visitors, setVisitors] = useState<Visitor[]>([]);
   const [loading, setLoading] = useState(true);
   
   // State to securely hold the logged-in guard's assigned building/company
   const [companyId, setCompanyId] = useState<string | null>(null);
+  
+  // Dynamic Form Rules
   const [requirePhoto, setRequirePhoto] = useState<boolean>(false);
+  const [askPhone, setAskPhone] = useState<boolean>(true);
+  const [askId, setAskId] = useState<boolean>(true);
 
   // OTP State
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
@@ -85,15 +92,17 @@ export default function GuardDashboard() {
       const currentCompanyId = profileData.company_id;
       setCompanyId(currentCompanyId);
 
-      // Fetch company rules (like require_photo)
+      // Fetch company rules (Photo, Phone, ID toggles)
       const { data: companyData } = await supabase
         .from("companies")
-        .select("require_photo")
+        .select("require_photo, ask_phone, ask_id")
         .eq("id", currentCompanyId)
         .single();
         
       if (companyData) {
         setRequirePhoto(companyData.require_photo || false);
+        setAskPhone(companyData.ask_phone !== false);
+        setAskId(companyData.ask_id !== false);
       }
 
       // 4. Fetch ONLY the visitors for this specific guard's building
@@ -103,7 +112,7 @@ export default function GuardDashboard() {
       const { data: visitorData, error: visitorError } = await supabase
         .from("visitors")
         .select("*")
-        .eq("company_id", currentCompanyId) // SECURITY: Filtering applied here!
+        .eq("company_id", currentCompanyId) 
         .gte("created_at", startOfToday.toISOString())
         .in("status", ["pending", "checked_in"])
         .order("created_at", { ascending: false });
@@ -142,6 +151,11 @@ export default function GuardDashboard() {
 
     return () => { supabase.removeChannel(channel); };
   }, []);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    router.push("/login");
+  };
 
   // --- OCR SCANNING LOGIC ---
   const handleImageCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -223,9 +237,9 @@ export default function GuardDashboard() {
         {
           company_id: companyId,
           name: newVisitor.name,
-          phone: newVisitor.phone,
-          document_type: newVisitor.doc_type,
-          id_number: newVisitor.id_number,
+          phone: askPhone ? newVisitor.phone : null,
+          document_type: askId ? newVisitor.doc_type : null,
+          id_number: askId ? newVisitor.id_number : null,
           status: "pending",
           photo_url: uploadedPhotoUrl
         }
@@ -301,9 +315,14 @@ export default function GuardDashboard() {
             <h1 className="text-3xl font-bold text-zinc-900">Gate Dashboard</h1>
             <p className="text-zinc-500">Live visitor monitoring and verification.</p>
           </div>
-          <Button onClick={() => setShowAddModal(true)} className="bg-blue-600 hover:bg-blue-700">
-            + New Visitor
-          </Button>
+          <div className="flex items-center gap-3">
+            <Button variant="outline" onClick={handleLogout} className="border-zinc-200 text-zinc-600 hover:bg-red-50 hover:text-red-600 hover:border-red-200">
+              <LogOut className="w-4 h-4 mr-2" /> Sign Out
+            </Button>
+            <Button onClick={() => setShowAddModal(true)} className="bg-blue-600 hover:bg-blue-700">
+              + New Visitor
+            </Button>
+          </div>
         </div>
 
         {/* Live Visitor Table */}
@@ -338,11 +357,14 @@ export default function GuardDashboard() {
                       <TableCell>
                         <div className="flex items-center gap-3">
                           {visitor.photo_url ? (
-                            <img 
+                            <Image 
                               src={visitor.photo_url} 
                               alt={`${visitor.name}'s photo`} 
+                              width={40}
+                              height={40}
                               className="w-10 h-10 rounded-full object-cover border-2 border-zinc-200 cursor-pointer hover:opacity-80 transition-opacity"
                               onClick={() => setEnlargedPhoto(visitor.photo_url!)}
+                              unoptimized
                             />
                           ) : (
                             <div className="w-10 h-10 rounded-full bg-zinc-100 flex items-center justify-center border-2 border-zinc-200 text-zinc-400">
@@ -354,7 +376,7 @@ export default function GuardDashboard() {
                       </TableCell>
 
                       <TableCell>
-                        <div className="text-sm">{visitor.phone}</div>
+                        <div className="text-sm">{visitor.phone || "—"}</div>
                         <div className="text-xs text-zinc-500">{visitor.id_number || "No ID"}</div>
                       </TableCell>
                       
@@ -434,16 +456,38 @@ export default function GuardDashboard() {
                   <Label>Full Name</Label>
                   <Input required value={newVisitor.name} onChange={(e) => setNewVisitor({...newVisitor, name: e.target.value})} placeholder="e.g. John Doe" />
                 </div>
-                <div>
-                  <Label>Phone Number</Label>
-                  <Input required type="tel" value={newVisitor.phone} onChange={(e) => setNewVisitor({...newVisitor, phone: e.target.value})} placeholder="0700000000" />
-                </div>
-                <div>
-                  <Label>ID Number</Label>
-                  <Input value={newVisitor.id_number} onChange={(e) => setNewVisitor({...newVisitor, id_number: e.target.value})} placeholder="Optional if scanning" />
-                </div>
 
-                {/* Security Selfie Section (ONLY VISIBLE IF ADMIN TOGGLES IT ON) */}
+                {/* DYNAMIC FIELD: PHONE */}
+                {askPhone && (
+                  <div>
+                    <Label>Phone Number</Label>
+                    <Input required type="tel" value={newVisitor.phone} onChange={(e) => setNewVisitor({...newVisitor, phone: e.target.value})} placeholder="0700000000" />
+                  </div>
+                )}
+
+                {/* DYNAMIC FIELDS: ID DOCUMENTS */}
+                {askId && (
+                  <>
+                    <div>
+                      <Label>Document Type</Label>
+                      <select
+                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
+                        value={newVisitor.doc_type}
+                        onChange={(e) => setNewVisitor({...newVisitor, doc_type: e.target.value})}
+                      >
+                        <option value="National ID">National ID</option>
+                        <option value="Passport">Passport</option>
+                        <option value="Driver's License">Driver's License</option>
+                      </select>
+                    </div>
+                    <div>
+                      <Label>ID / Document Number</Label>
+                      <Input value={newVisitor.id_number} onChange={(e) => setNewVisitor({...newVisitor, id_number: e.target.value})} placeholder="Optional if scanning" />
+                    </div>
+                  </>
+                )}
+
+                {/* SECURITY PHOTO - ONLY VISIBLE IF ADMIN TOGGLED IT ON */}
                 {requirePhoto && (
                   <div className="space-y-3 pt-2">
                     <Label className="flex justify-between items-center">
@@ -454,7 +498,14 @@ export default function GuardDashboard() {
                     <div className="flex items-center gap-4">
                       <div className="w-16 h-16 rounded-full bg-zinc-100 border-2 border-dashed border-zinc-300 flex items-center justify-center overflow-hidden shrink-0">
                         {selfiePreview ? (
-                          <img src={selfiePreview} alt="Selfie preview" className="w-full h-full object-cover" />
+                          <Image 
+                            src={selfiePreview} 
+                            alt="Selfie preview" 
+                            width={64}
+                            height={64}
+                            className="w-full h-full object-cover" 
+                            unoptimized
+                          />
                         ) : (
                           <UserCircle className="w-8 h-8 text-zinc-300" />
                         )}
@@ -504,11 +555,14 @@ export default function GuardDashboard() {
             >
               <X size={32} />
             </button>
-            <img 
+            <Image 
               src={enlargedPhoto} 
-              className="w-full h-auto rounded-lg shadow-[0_0_50px_rgba(0,0,0,0.5)] border-4 border-zinc-800 object-contain max-h-[85vh]" 
               alt="Enlarged security photo" 
+              width={1000}
+              height={1000}
+              className="w-full h-auto rounded-lg shadow-[0_0_50px_rgba(0,0,0,0.5)] border-4 border-zinc-800 object-contain max-h-[85vh]" 
               onClick={(e) => e.stopPropagation()} 
+              unoptimized
             />
           </div>
         </div>

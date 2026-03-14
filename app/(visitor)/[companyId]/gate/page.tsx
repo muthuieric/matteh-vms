@@ -14,7 +14,9 @@ export default function GateCheckIn() {
   const companyId = params.companyId as string;
 
   const [companyName, setCompanyName] = useState<string>("Loading...");
-  const [isLocked, setIsLocked] = useState(false);
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+
+  // --- BUILDING RULE STATE ---
   const [requirePhoto, setRequirePhoto] = useState(false);
 
   const [formData, setFormData] = useState({
@@ -24,7 +26,6 @@ export default function GateCheckIn() {
     idNumber: "",
   });
 
-  // Scanner & Photo State
   const [isScanningId, setIsScanningId] = useState(false);
   const idInputRef = useRef<HTMLInputElement>(null);
   
@@ -37,23 +38,21 @@ export default function GateCheckIn() {
 
   useEffect(() => {
     const fetchCompany = async () => {
-      // Fetch the admin's setting for require_photo
       const { data } = await supabase
         .from("companies")
-        .select("name, is_locked, require_photo")
+        .select("name, logo_url, require_photo")
         .eq("id", companyId)
         .single();
 
       if (data) {
         setCompanyName(data.name);
-        setIsLocked(data.is_locked);
+        setLogoUrl(data.logo_url);
         setRequirePhoto(data.require_photo || false);
       }
     };
     if (companyId) fetchCompany();
   }, [companyId]);
 
-  // --- OCR ID SCANNER ---
   const handleIdScan = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -65,7 +64,6 @@ export default function GateCheckIn() {
       reader.onloadend = async () => {
         const base64data = reader.result;
         
-        // Send image string to our OpenAI API route
         const response = await fetch("/api/ocr", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -74,7 +72,6 @@ export default function GateCheckIn() {
 
         const result = await response.json();
 
-        // Magic Auto-Fill!
         if (result.success && result.data) {
           setFormData(prev => ({
             ...prev,
@@ -93,7 +90,6 @@ export default function GateCheckIn() {
     }
   };
 
-  // --- SELFIE CAPTURE ---
   const handleSelfieCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -102,11 +98,10 @@ export default function GateCheckIn() {
     }
   };
 
-  // --- SUBMIT REGISTRATION ---
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Validate selfie requirement
+    // Strict Check: Did the Admin require a photo, but the visitor skipped it?
     if (requirePhoto && !selfieFile) {
       alert("A security photo (selfie) is required by this building's management.");
       return;
@@ -116,7 +111,6 @@ export default function GateCheckIn() {
     let uploadedPhotoUrl = null;
 
     try {
-      // 1. Upload Selfie to Cloudflare R2 via our upcoming backend API
       if (selfieFile) {
         const formDataPayload = new FormData();
         formDataPayload.append("file", selfieFile);
@@ -131,13 +125,12 @@ export default function GateCheckIn() {
         if (uploadData.success) {
           uploadedPhotoUrl = uploadData.url;
         } else {
-          // If we are strictly requiring it but the upload fails
           console.error("Cloudflare upload failed:", uploadData.error);
           throw new Error("Failed to securely upload security photo.");
         }
       }
 
-      // 2. Insert into Supabase
+      // Name, Phone, and ID are mandatory for all visitors again.
       const { error } = await supabase.from("visitors").insert([
         {
           company_id: companyId,
@@ -146,7 +139,7 @@ export default function GateCheckIn() {
           document_type: formData.documentType,
           id_number: formData.idNumber,
           status: "pending",
-          photo_url: uploadedPhotoUrl // We will add this column next!
+          photo_url: uploadedPhotoUrl
         }
       ]);
 
@@ -162,18 +155,6 @@ export default function GateCheckIn() {
       setIsSubmitting(false);
     }
   };
-
-  if (isLocked) {
-    return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4">
-        <Card className="max-w-md w-full border-red-900 bg-zinc-900 text-center p-6">
-          <ShieldAlert className="w-16 h-16 text-red-500 mx-auto mb-4" />
-          <h2 className="text-xl font-bold text-white mb-2">Check-in Unavailable</h2>
-          <p className="text-zinc-400">Visitor registration is temporarily suspended for this building.</p>
-        </Card>
-      </div>
-    );
-  }
 
   if (success) {
     return (
@@ -194,11 +175,14 @@ export default function GateCheckIn() {
   return (
     <div className="min-h-screen bg-zinc-50 flex flex-col items-center py-12 px-4">
       
-      {/* Standard Header */}
-      <div className="text-center mb-6 space-y-4">
-        <div className="w-16 h-16 bg-blue-600 text-white rounded-xl flex items-center justify-center text-2xl font-bold mx-auto shadow-lg">
-          {companyName.charAt(0)}
-        </div>
+      <div className="text-center mb-8 space-y-4">
+        {logoUrl ? (
+          <img src={logoUrl} alt={`${companyName} Logo`} className="h-20 mx-auto object-contain drop-shadow-sm" />
+        ) : (
+          <div className="w-16 h-16 bg-blue-600 text-white rounded-xl flex items-center justify-center text-2xl font-bold mx-auto shadow-lg">
+            {companyName.charAt(0)}
+          </div>
+        )}
         <h1 className="text-2xl font-bold text-zinc-900">{companyName}</h1>
         <p className="text-zinc-500 font-medium">Visitor Check-in Portal</p>
       </div>
@@ -206,7 +190,6 @@ export default function GateCheckIn() {
       <Card className="w-full max-w-md shadow-xl border-t-4 border-t-blue-600">
         <CardContent className="pt-6">
           
-          {/* Smart ID Scanner Button */}
           <div className="mb-6">
             <input 
               type="file" accept="image/*" capture="environment" 
@@ -243,67 +226,67 @@ export default function GateCheckIn() {
               <Input required type="tel" placeholder="e.g. 0712345678" value={formData.phone} onChange={(e) => setFormData({...formData, phone: e.target.value})} />
             </div>
 
-            <div className="space-y-2">
-              <Label>Document Type</Label>
-              <select
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
-                value={formData.documentType}
-                onChange={(e) => setFormData({...formData, documentType: e.target.value})}
-              >
-                <option value="National ID">National ID</option>
-                <option value="Passport">Passport</option>
-                <option value="Driver's License">Driver's License</option>
-              </select>
-            </div>
+            <div className="space-y-5">
+              <div className="space-y-2">
+                <Label>Document Type</Label>
+                <select
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  value={formData.documentType}
+                  onChange={(e) => setFormData({...formData, documentType: e.target.value})}
+                >
+                  <option value="National ID">National ID</option>
+                  <option value="Passport">Passport</option>
+                  <option value="Driver's License">Driver's License</option>
+                </select>
+              </div>
 
-            <div className="space-y-2">
-              <Label>Document Number</Label>
-              <Input required placeholder="Enter ID/Passport Number" value={formData.idNumber} onChange={(e) => setFormData({...formData, idNumber: e.target.value})} />
-            </div>
-
-            {/* Security Selfie Section */}
-            <div className="space-y-3 pt-2">
-              <Label className="flex justify-between items-center">
-                Security Photo (Selfie)
-                {requirePhoto ? (
-                  <span className="text-xs text-red-500 font-semibold">* Required</span>
-                ) : (
-                  <span className="text-xs text-zinc-400">Optional</span>
-                )}
-              </Label>
-              
-              <div className="flex items-center gap-4">
-                <div className="w-16 h-16 rounded-full bg-zinc-100 border-2 border-dashed border-zinc-300 flex items-center justify-center overflow-hidden shrink-0">
-                  {selfiePreview ? (
-                    <img src={selfiePreview} alt="Selfie preview" className="w-full h-full object-cover" />
-                  ) : (
-                    <UserCircle className="w-8 h-8 text-zinc-300" />
-                  )}
-                </div>
-                
-                <div className="flex-1">
-                  <input 
-                    type="file" accept="image/*" capture="user" 
-                    className="hidden" ref={selfieInputRef} onChange={handleSelfieCapture} 
-                  />
-                  <Button 
-                    type="button" variant="secondary" className="w-full text-xs bg-zinc-100 hover:bg-zinc-200"
-                    onClick={() => selfieInputRef.current?.click()}
-                  >
-                    <Camera className="w-4 h-4 mr-2" /> Take Photo
-                  </Button>
-                </div>
+              <div className="space-y-2">
+                <Label>Document Number</Label>
+                <Input required placeholder="Enter ID/Passport Number" value={formData.idNumber} onChange={(e) => setFormData({...formData, idNumber: e.target.value})} />
               </div>
             </div>
 
+            {/* DYNAMIC FIELD: SECURITY SELFIE - ONLY COMES UP IF ADMIN TOGGLES IT */}
+            {requirePhoto && (
+              <div className="space-y-3 pt-2 animate-in fade-in slide-in-from-top-2">
+                <Label className="flex justify-between items-center">
+                  Security Photo (Selfie)
+                  <span className="text-xs text-red-500 font-semibold">* Required</span>
+                </Label>
+                
+                <div className="flex items-center gap-4">
+                  <div className="w-16 h-16 rounded-full bg-zinc-100 border-2 border-dashed border-zinc-300 flex items-center justify-center overflow-hidden shrink-0">
+                    {selfiePreview ? (
+                      <img src={selfiePreview} alt="Selfie preview" className="w-full h-full object-cover" />
+                    ) : (
+                      <UserCircle className="w-8 h-8 text-zinc-300" />
+                    )}
+                  </div>
+                  
+                  <div className="flex-1">
+                    <input 
+                      type="file" accept="image/*" capture="user" 
+                      className="hidden" ref={selfieInputRef} onChange={handleSelfieCapture} 
+                    />
+                    <Button 
+                      type="button" variant="secondary" className="w-full text-xs bg-zinc-100 hover:bg-zinc-200"
+                      onClick={() => selfieInputRef.current?.click()}
+                    >
+                      <Camera className="w-4 h-4 mr-2" /> Take Photo
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="pt-4">
               <Button type="submit" className="w-full h-12 text-lg bg-blue-600 hover:bg-blue-700" disabled={isSubmitting}>
-                {isSubmitting ? "Processing Registration..." : "Submit Registration"}
+                {isSubmitting ? "Sending to Security..." : "Submit Registration"}
               </Button>
             </div>
             
             <p className="text-xs text-zinc-500 text-center mt-4 px-2 leading-relaxed">
-              By submitting, I consent to my details and image being securely stored for <strong>7 days</strong> for building security purposes, after which they are permanently deleted in compliance with data privacy laws.
+              By submitting, I consent to my details {requirePhoto ? "and image " : ""}being securely stored for <strong>7 days</strong> for building security purposes, after which they are permanently deleted in compliance with data privacy laws.
             </p>
           </form>
         </CardContent>
