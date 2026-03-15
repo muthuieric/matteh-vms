@@ -3,7 +3,7 @@ import { getPesapalToken } from "@/lib/pesapal";
 
 export async function POST(req: Request) {
   try {
-    const { companyId } = await req.json();
+    const { companyId, amount } = await req.json();
 
     if (!companyId) {
       return NextResponse.json({ error: "Missing company ID" }, { status: 400 });
@@ -11,16 +11,18 @@ export async function POST(req: Request) {
 
     const token = await getPesapalToken();
 
-    // FIX: Supabase UUIDs are 36 chars. A 5-digit random number is 5 chars. 
-    // Format: "companyId-12345" (42 characters total, well under PesaPal's 50-char limit!)
+    // Generate a unique 5-digit number to avoid duplicate order IDs
     const shortRandom = Math.floor(10000 + Math.random() * 90000);
     const uniqueMerchantReference = `${companyId}-${shortRandom}`;
+
+    // Ensure we have an amount, fallback to 5000 just in case
+    const paymentAmount = amount || 5000;
 
     const orderPayload = {
       id: uniqueMerchantReference, 
       currency: "KES",
-      amount: 5000,
-      description: "VMS Global Standard Plan Subscription",
+      amount: paymentAmount,
+      description: `VMS Global Standard Plan - KES ${paymentAmount}`,
       callback_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/company-admin/payment-success`,
       notification_id: process.env.PESAPAL_IPN_ID,
       billing_address: {

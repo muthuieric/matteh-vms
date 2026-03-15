@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase";
-import { Building2, LayoutDashboard, CreditCard, LogOut, Settings } from "lucide-react";
+import { supabase } from "@/lib/supabase"
+import { Building2, LayoutDashboard, CreditCard, LogOut,Receipt, Settings } from "lucide-react";
 
 export default function SuperadminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -76,6 +76,12 @@ export default function SuperadminLayout({ children }: { children: React.ReactNo
             className={`flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/superadmin/billing" ? "bg-amber-500/10 text-amber-500" : "hover:bg-zinc-800 hover:text-white"}`}
           >
             <CreditCard size={18} /> Subscriptions & Billing
+          </Link>
+          <Link 
+            href="/dashboard/superadmin/transactions" 
+            className={`flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/superadmin/transactions" ? "bg-zinc-800 text-white" : "hover:bg-zinc-900 hover:text-white"}`}
+          >
+            <Receipt size={18} /> Master Ledger
           </Link>
           <Link 
             href="/dashboard/superadmin/settings"

@@ -12,20 +12,18 @@ export default function CompanyAdminLayout({ children }: { children: React.React
   const pathname = usePathname();
   const router = useRouter();
   
-  // State to track if the company is suspended
   const [isLocked, setIsLocked] = useState<boolean>(false);
   const [loading, setLoading] = useState(true);
   
-  // New States for Payment Integration
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [isPaying, setIsPaying] = useState(false);
+  const [monthsToPay, setMonthsToPay] = useState(1);
 
   useEffect(() => {
     const verifyAccountStatus = async () => {
       const { data: authData } = await supabase.auth.getUser();
       
       if (authData?.user) {
-        // 1. Get the user's company ID
         const { data: profile } = await supabase
           .from("profiles")
           .select("company_id")
@@ -33,17 +31,22 @@ export default function CompanyAdminLayout({ children }: { children: React.React
           .single();
 
         if (profile?.company_id) {
-          setCompanyId(profile.company_id); // Save it for the payment process
+          setCompanyId(profile.company_id);
 
-          // 2. Check if that specific company is locked by the Superadmin!
           const { data: company } = await supabase
             .from("companies")
-            .select("is_locked")
+            .select("is_locked, subscription_ends_at")
             .eq("id", profile.company_id)
             .single();
 
-          if (company?.is_locked) {
-            setIsLocked(true);
+          if (company) {
+            const isExpired = company.subscription_ends_at 
+              ? new Date(company.subscription_ends_at) < new Date() 
+              : false; 
+
+            if (company.is_locked || isExpired) {
+              setIsLocked(true);
+            }
           }
         }
       }
@@ -58,23 +61,23 @@ export default function CompanyAdminLayout({ children }: { children: React.React
     router.push("/login");
   };
 
-  // --- TRIGGER PESAPAL PAYMENT ---
   const handlePayment = async () => {
     if (!companyId) return;
     setIsPaying(true);
 
     try {
-      // FIX: Pointing to the NEW API folder structure!
       const response = await fetch("/api/payments/pesapal/initiate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ companyId }),
+        body: JSON.stringify({ 
+          companyId,
+          amount: monthsToPay * 5000 
+        }),
       });
 
       const data = await response.json();
 
       if (data.redirect_url) {
-        // Redirect the user to the secure Pesapal payment page!
         window.location.href = data.redirect_url;
       } else {
         alert("Payment initialization failed. Please try again later.");
@@ -88,8 +91,11 @@ export default function CompanyAdminLayout({ children }: { children: React.React
     }
   };
 
-  // --- THE LOCKOUT SCREEN ---
-  if (isLocked) {
+  // FIX: Check if the user is currently on the payment-success page
+  const isPaymentSuccessPage = pathname.includes("/payment-success");
+
+  // FIX: Only show the lockout screen if they are NOT on the success page
+  if (isLocked && !isPaymentSuccessPage) {
     return (
       <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4">
         <Card className="max-w-md w-full border-red-900 bg-zinc-900 text-zinc-100 shadow-2xl">
@@ -99,17 +105,32 @@ export default function CompanyAdminLayout({ children }: { children: React.React
             </div>
             <CardTitle className="text-2xl font-bold text-white">Account Suspended</CardTitle>
             <CardDescription className="text-zinc-400">
-              Your company's access to the Visitor Management System has been paused.
+              Your company's access to the VMS has expired or been paused.
             </CardDescription>
           </CardHeader>
-          <CardContent className="text-center space-y-6 pt-4">
-            <p className="text-sm text-zinc-300">
-              This is usually due to an expired subscription or a pending payment. Please settle your outstanding balance to instantly restore access for you and your security team.
+          <CardContent className="space-y-6 pt-4">
+            <p className="text-sm text-center text-zinc-300">
+              Please settle your balance to instantly restore access for you and your security team.
             </p>
             
-            <div className="bg-black/50 p-4 rounded-lg border border-zinc-800">
-              <p className="text-xs text-zinc-500 uppercase tracking-wider font-bold mb-1">Subscription Renewal</p>
-              <p className="text-sm font-medium text-zinc-300">Standard Plan - KES 5,000</p>
+            <div className="bg-black/50 p-4 rounded-lg border border-zinc-800 space-y-3">
+              <div>
+                <label className="text-xs text-zinc-500 uppercase tracking-wider font-bold mb-1 block">Renew Subscription</label>
+                <select 
+                  value={monthsToPay} 
+                  onChange={(e) => setMonthsToPay(Number(e.target.value))}
+                  className="w-full bg-zinc-950 border border-zinc-700 text-white rounded p-2 text-sm focus:ring-amber-500"
+                >
+                  <option value={1}>1 Month (KES 5,000)</option>
+                  <option value={2}>2 Months (KES 10,000)</option>
+                  <option value={6}>6 Months (KES 30,000)</option>
+                  <option value={12}>1 Year (KES 60,000)</option>
+                </select>
+              </div>
+              <div className="flex justify-between items-center pt-2 border-t border-zinc-800">
+                <span className="text-sm text-zinc-400">Total</span>
+                <span className="text-lg font-bold text-white">KES {(monthsToPay * 5000).toLocaleString()}</span>
+              </div>
             </div>
 
             <div className="flex gap-3 justify-center pt-2">
@@ -130,7 +151,6 @@ export default function CompanyAdminLayout({ children }: { children: React.React
     );
   }
 
-  // --- NORMAL LOADING STATE ---
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-zinc-50">
@@ -139,11 +159,9 @@ export default function CompanyAdminLayout({ children }: { children: React.React
     );
   }
 
-  // --- NORMAL DASHBOARD RENDER ---
   return (
     <div className="flex min-h-screen bg-zinc-50">
       
-      {/* UNIVERSAL SIDEBAR */}
       <aside className="w-64 bg-white border-r border-zinc-200 hidden md:flex flex-col shadow-sm z-10">
         <div className="p-6 border-b border-zinc-200">
           <h2 className="text-xl font-extrabold text-zinc-900 tracking-tight">VMS Portal</h2>
@@ -155,36 +173,31 @@ export default function CompanyAdminLayout({ children }: { children: React.React
             href="/dashboard/company-admin" 
             className={`flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100"}`}
           >
-            <LayoutDashboard size={18} />
-            Overview
+            <LayoutDashboard size={18} /> Overview
           </Link>
           <Link 
             href="/dashboard/company-admin/qr" 
             className={`flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/qr" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100"}`}
           >
-            <QrCode size={18} />
-            Gate QR Code
+            <QrCode size={18} /> Gate QR Code
           </Link>
           <Link 
             href="/dashboard/company-admin/guards" 
             className={`flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/guards" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100"}`}
           >
-            <Shield size={18} />
-            Security Team
+            <Shield size={18} /> Security Team
           </Link>
           <Link 
             href="/dashboard/company-admin/billing" 
             className={`flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/billing" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100"}`}
           >
-            <CreditCard size={18} />
-            Billing
+            <CreditCard size={18} /> Billing
           </Link>
           <Link 
             href="/dashboard/company-admin/settings" 
             className={`flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/settings" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100"}`}
           >
-            <Settings size={18} />
-            Settings
+            <Settings size={18} /> Settings
           </Link>
         </nav>
 
@@ -193,13 +206,11 @@ export default function CompanyAdminLayout({ children }: { children: React.React
             onClick={handleLogout}
             className="flex items-center gap-3 px-3 py-2.5 w-full text-zinc-600 rounded-md hover:bg-red-50 hover:text-red-600 transition-colors font-medium text-sm"
           >
-            <LogOut size={18} />
-            Sign Out
+            <LogOut size={18} /> Sign Out
           </button>
         </div>
       </aside>
 
-      {/* MAIN PAGE CONTENT */}
       <main className="flex-1 overflow-y-auto relative">
         {children}
       </main>
