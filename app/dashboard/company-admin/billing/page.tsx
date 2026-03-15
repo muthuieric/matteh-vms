@@ -10,71 +10,89 @@ export default function BillingPage() {
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [isPaying, setIsPaying] = useState(false);
   const [subscriptionStatus, setSubscriptionStatus] = useState<string>("Loading...");
-  
-  // New state to hold the Pesapal Iframe URL (Step 3 of Pesapal Docs)
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
+  
+  // New states to debug the exact issue
+  const [isInitializing, setIsInitializing] = useState(true);
+  const [profileError, setProfileError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchBillingData = async () => {
-      const { data: authData } = await supabase.auth.getUser();
-      if (authData?.user) {
-        // 1. Get Profile to find company ID
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("company_id")
-          .eq("id", authData.user.id)
-          .single();
+      setIsInitializing(true);
+      setProfileError(null);
 
-        if (profile?.company_id) {
+      try {
+        const { data: authData, error: authError } = await supabase.auth.getUser();
+        if (authError) throw authError;
+
+        if (authData?.user) {
+          const { data: profile, error: dbError } = await supabase
+            .from("profiles")
+            .select("company_id")
+            .eq("id", authData.user.id)
+            .single();
+
+          if (dbError) {
+            throw new Error(`Database Error: ${dbError.message}`);
+          }
+
+          if (!profile?.company_id) {
+            throw new Error("Your account profile exists, but it has no 'company_id' assigned to it.");
+          }
+
           setCompanyId(profile.company_id);
           
-          // 2. Fetch the company's current subscription status
-          const { data: company } = await supabase
+          const { data: company, error: compError } = await supabase
             .from("companies")
             .select("subscription_status")
             .eq("id", profile.company_id)
             .single();
             
+          if (compError) throw compError;
+
           if (company) {
             setSubscriptionStatus(company.subscription_status || "trial");
           }
         }
+      } catch (error: any) {
+        console.error("Initialization failed:", error);
+        setProfileError(error.message || "An unknown error occurred loading your profile.");
+      } finally {
+        setIsInitializing(false);
       }
     };
-
+    
     fetchBillingData();
   }, []);
 
-  // --- TRIGGER PESAPAL PAYMENT ---
   const handlePayment = async () => {
     if (!companyId) return;
     setIsPaying(true);
 
     try {
-      const response = await fetch("/api/pesapal/checkout", {
+      // FIX: Pointing to the API route you ACTUALLY have!
+      const response = await fetch("/api/payments/pesapal/initiate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ companyId }),
+        body: JSON.stringify({ companyId }), 
       });
 
       const data = await response.json();
 
       if (data.redirect_url) {
-        // Embed the payments page directly in the site via IFrame!
-        setPaymentUrl(data.redirect_url);
+        setPaymentUrl(data.redirect_url); // Opens the PesaPal Iframe
       } else {
-        alert("Payment initialization failed. Please try again later.");
-        console.error("Pesapal Error:", data);
+        console.error("Backend Error:", data);
+        alert(`Payment initialization failed: ${data.error || "Unknown error"}. Check server console.`);
       }
     } catch (error) {
-      console.error(error);
-      alert("An error occurred starting the payment.");
+      console.error("Fetch Error:", error);
+      alert("An error occurred starting the payment. Please check your network connection.");
     } finally {
       setIsPaying(false);
     }
   };
 
-  // If we have a payment URL, render the Pesapal Iframe!
   if (paymentUrl) {
     return (
       <div className="min-h-screen bg-zinc-50 p-6 md:p-10">
@@ -83,29 +101,33 @@ export default function BillingPage() {
             <ArrowLeft className="mr-2 h-4 w-4" /> Cancel Checkout
           </Button>
           <Card className="shadow-2xl overflow-hidden border-t-4 border-t-amber-600 p-0">
-            <iframe 
-              src={paymentUrl} 
-              className="w-full h-[700px] border-0 bg-white" 
-              title="Pesapal Secure Checkout"
-            />
+            <iframe src={paymentUrl} className="w-full h-[700px] border-0 bg-white" title="Pesapal Secure Checkout" />
           </Card>
         </div>
       </div>
     );
   }
 
-  // Normal Billing Dashboard Render
   return (
     <div className="min-h-screen bg-zinc-50 p-6 md:p-10">
       <div className="max-w-4xl mx-auto space-y-8">
-        
         <div className="border-b border-zinc-200 pb-4">
           <h1 className="text-3xl font-bold text-zinc-900">Billing & Subscription</h1>
           <p className="text-zinc-500 mt-1">Manage your building's active plan and payment methods.</p>
         </div>
 
+        {/* --- ERROR DISPLAY --- */}
+        {profileError && (
+          <div className="bg-red-50 text-red-700 p-4 rounded-lg border border-red-200 font-medium flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 mt-0.5 shrink-0" />
+            <div>
+              <p className="font-bold">Could not load your company profile:</p>
+              <p className="text-sm mt-1 text-red-600">{profileError}</p>
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Current Plan Card */}
           <Card className="shadow-sm">
             <CardHeader>
               <CardTitle>Current Plan</CardTitle>
@@ -118,30 +140,20 @@ export default function BillingPage() {
                   subscriptionStatus === 'trial' ? 'bg-amber-100 text-amber-600' : 
                   'bg-red-100 text-red-600'
                 }`}>
-                  {subscriptionStatus === 'paid' ? <CheckCircle2 size={24} /> : <AlertCircle size={24} />}
+                  {isInitializing ? <Loader2 className="w-6 h-6 animate-spin" /> : subscriptionStatus === 'paid' ? <CheckCircle2 size={24} /> : <AlertCircle size={24} />}
                 </div>
                 <div>
                   <h3 className="text-xl font-bold uppercase tracking-wide text-zinc-900">
-                    {subscriptionStatus === 'paid' ? 'Active - Standard' : subscriptionStatus === 'trial' ? 'Trial Period' : 'Unpaid / Suspended'}
+                    {isInitializing ? 'Loading...' : subscriptionStatus === 'paid' ? 'Active - Standard' : subscriptionStatus === 'trial' ? 'Trial Period' : 'Unpaid / Suspended'}
                   </h3>
                   <p className="text-sm text-zinc-500">
-                    {subscriptionStatus === 'paid' ? 'All features unlocked.' : 'Please pay to ensure uninterrupted access.'}
+                    {isInitializing ? 'Fetching status from database' : subscriptionStatus === 'paid' ? 'All features unlocked.' : 'Please pay to ensure uninterrupted access.'}
                   </p>
                 </div>
-              </div>
-
-              <div className="pt-4 border-t border-zinc-100">
-                <p className="text-sm font-medium text-zinc-600 mb-2">Plan includes:</p>
-                <ul className="text-sm text-zinc-500 space-y-2">
-                  <li className="flex items-center"><CheckCircle2 className="w-4 h-4 mr-2 text-green-500" /> Unlimited Visitor Check-ins</li>
-                  <li className="flex items-center"><CheckCircle2 className="w-4 h-4 mr-2 text-green-500" /> Unlimited Guard Accounts</li>
-                  <li className="flex items-center"><CheckCircle2 className="w-4 h-4 mr-2 text-green-500" /> Data Export & Analytics</li>
-                </ul>
               </div>
             </CardContent>
           </Card>
 
-          {/* Payment Card */}
           <Card className="shadow-sm border-t-4 border-t-amber-600">
             <CardHeader>
               <CardTitle>Make a Payment</CardTitle>
@@ -155,18 +167,17 @@ export default function BillingPage() {
               
               <Button 
                 onClick={handlePayment} 
-                disabled={isPaying || !companyId} 
+                disabled={isPaying || isInitializing || !companyId} 
                 className="w-full h-12 text-lg bg-amber-600 hover:bg-amber-700 text-white"
               >
-                {isPaying ? (
-                  <><Loader2 className="w-5 h-5 mr-2 animate-spin" /> Generating Secure Iframe...</>
+                {isInitializing ? (
+                  <><Loader2 className="w-5 h-5 mr-2 animate-spin" /> Verifying Profile...</>
+                ) : isPaying ? (
+                  <><Loader2 className="w-5 h-5 mr-2 animate-spin" /> Generating Secure Checkout...</>
                 ) : (
                   <><CreditCard className="w-5 h-5 mr-2" /> Pay Now via Pesapal</>
                 )}
               </Button>
-              <p className="text-xs text-center text-zinc-400">
-                Payments are processed securely. Your account will be updated automatically upon success.
-              </p>
             </CardContent>
           </Card>
         </div>

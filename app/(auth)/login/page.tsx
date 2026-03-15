@@ -32,7 +32,6 @@ export default function LoginPage() {
 
       // 2. Fetch the user's specific role from the profiles table
       if (authData.user) {
-        // Changed to maybeSingle() so it doesn't crash instantly if the row is missing
         const { data: profile, error: profileError } = await supabase
           .from("profiles")
           .select("role")
@@ -40,25 +39,27 @@ export default function LoginPage() {
           .maybeSingle();
 
         if (profileError) {
-          console.error("Error fetching profile:", profileError);
           throw new Error(`Database error: ${profileError.message}`);
         }
 
-        // If the row doesn't exist, tell the user exactly what ID they need to use!
         if (!profile) {
           throw new Error(`Profile not found! Please check your database. Your exact Auth UUID is: ${authData.user.id}`);
         }
 
+        // Clean up the role to avoid invisible space or capitalization bugs
+        const rawRole = profile?.role || "";
+        const userRole = rawRole.trim().toLowerCase();
+
         // 3. The Magic: Dynamic Routing based on Role
-        if (profile?.role === "super_admin" || profile?.role === "superadmin") {
-          router.push("/dashboard/superadmin");
-        } else if (profile?.role === "admin" || profile?.role === "company_admin") {
-          router.push("/dashboard/company-admin");
-        } else if (profile?.role === "guard") {
-          router.push("/dashboard/guard");
+        // Using window.location.href for a hard refresh to bypass Next.js route caching
+        if (userRole === "super_admin" || userRole === "superadmin") {
+          window.location.href = "/dashboard/superadmin";
+        } else if (userRole === "admin" || userRole === "company_admin") {
+          window.location.href = "/dashboard/company-admin";
+        } else if (userRole === "guard") {
+          window.location.href = "/dashboard/guard";
         } else {
-          setError(`Your account has an unknown role: ${profile.role}`);
-          // Sign them back out if they are invalid
+          setError(`Your account has an unknown role: "${rawRole}"`);
           await supabase.auth.signOut(); 
         }
       }

@@ -64,7 +64,8 @@ export default function CompanyAdminLayout({ children }: { children: React.React
     setIsPaying(true);
 
     try {
-      const response = await fetch("/api/pesapal/checkout", {
+      // FIX: Pointing to the NEW API folder structure!
+      const response = await fetch("/api/payments/pesapal/initiate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ companyId }),
