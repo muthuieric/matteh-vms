@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getTransactionStatus } from "@/lib/pesapal";
-import { createClient } from "@supabase/supabase-js"; // Import the client creator
+import { createClient } from "@supabase/supabase-js";
 
 export async function POST(req: Request) {
   try {
@@ -12,10 +12,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing parameters" }, { status: 400 });
     }
 
-    // 1. Create a "Superadmin" Supabase client that bypasses RLS security blocks
     const supabaseAdmin = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY! // Bypasses database security!
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
 
     const statusData = await getTransactionStatus(orderTrackingId);
@@ -23,18 +22,21 @@ export async function POST(req: Request) {
     if (statusData.status_code === 1) { // 1 = Completed
       const actualCompanyId = merchantReference.substring(0, 36);
       const amountPaid = statusData.amount || 5000;
-      
       const monthsToAdd = Math.max(1, Math.floor(amountPaid / 5000));
 
-      // SMART CHECK: Prevent double-logging if the success page already verified it!
-      const { data: existingTx } = await supabaseAdmin
+      // 1. Try to INSERT the transaction FIRST. 
+      // This uses the database's UNIQUE lock to guarantee only one script succeeds!
+      const { error: txError } = await supabaseAdmin
         .from('transactions')
-        .select('id')
-        .eq('tracking_id', orderTrackingId)
-        .single();
+        .insert({
+          company_id: actualCompanyId,
+          amount: amountPaid,
+          tracking_id: orderTrackingId,
+          status: 'Completed'
+        });
 
-      if (!existingTx) {
-        // Fetch current subscription expiry to add time properly
+      // 2. If NO error, we won the race! We are the first script to process this payment.
+      if (!txError) {
         const { data: company } = await supabaseAdmin
           .from('companies')
           .select('subscription_ends_at, amount_paid')
@@ -42,14 +44,12 @@ export async function POST(req: Request) {
           .single();
 
         let newExpiryDate = new Date();
-        
         if (company?.subscription_ends_at && new Date(company.subscription_ends_at) > new Date()) {
           newExpiryDate = new Date(company.subscription_ends_at);
         }
-        
         newExpiryDate.setMonth(newExpiryDate.getMonth() + monthsToAdd);
 
-        // Update the company record
+        // Safely update the company now that we know we are the only ones doing it
         await supabaseAdmin
           .from('companies')
           .update({ 
@@ -60,23 +60,16 @@ export async function POST(req: Request) {
           })
           .eq('id', actualCompanyId);
           
-        // LOG THE TRANSACTION HISTORY
-        await supabaseAdmin
-          .from('transactions')
-          .insert({
-            company_id: actualCompanyId,
-            amount: amountPaid,
-            tracking_id: orderTrackingId,
-            status: 'Completed'
-          });
-
-        console.log(`[IPN] Payment successful for company: ${actualCompanyId}. Extended by ${monthsToAdd} months.`);
+        console.log(`[IPN] Processed payment successfully for: ${actualCompanyId}`);
+      } 
+      // 3. '23505' is the database error code for "Unique Violation" (Already Exists)
+      else if (txError.code === '23505') {
+        console.log(`[IPN] Transaction ${orderTrackingId} already processed by verify route. Skipping.`);
       } else {
-         console.log(`[IPN] Transaction ${orderTrackingId} already processed by verification route. Skipping.`);
+        console.error("[IPN] DB Insert Error:", txError);
       }
     }
 
-    // Always return a 200 status back to PesaPal so they know we received the IPN
     return NextResponse.json({
       orderNotificationType: "IPN",
       orderTrackingId: orderTrackingId,

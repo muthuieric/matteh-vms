@@ -24,6 +24,7 @@ export default function ManageCompaniesPage() {
   // Modals
   const [showAddModal, setShowAddModal] = useState(false);
   const [newCompanyName, setNewCompanyName] = useState("");
+  const [planType, setPlanType] = useState<"none" | "trial_1" | "trial_2">("trial_1");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Admin Creation Modal State
@@ -32,7 +33,7 @@ export default function ManageCompaniesPage() {
   const [adminForm, setAdminForm] = useState({ fullName: "", email: "", password: "" });
   const [isCreatingAdmin, setIsCreatingAdmin] = useState(false);
 
-  // View Data Modal State (Updated for Count Only)
+  // View Data Modal State (Count Only)
   const [showVisitorsModal, setShowVisitorsModal] = useState(false);
   const [visitorCount, setVisitorCount] = useState<number>(0);
   const [loadingVisitors, setLoadingVisitors] = useState(false);
@@ -63,15 +64,36 @@ export default function ManageCompaniesPage() {
     e.preventDefault();
     setIsSubmitting(true);
     
+    let status = "unpaid";
+    let endsAt = null;
+    let startLocked = true; // Default to explicitly locked if "No Trial"
+
+    if (planType === "trial_1" || planType === "trial_2") {
+      status = "trial";
+      startLocked = false; // Unlock if they selected a trial
+      const expiryDate = new Date();
+      // Add 1 or 2 months to today's date
+      const monthsToAdd = planType === "trial_1" ? 1 : 2;
+      expiryDate.setMonth(expiryDate.getMonth() + monthsToAdd);
+      endsAt = expiryDate.toISOString();
+    }
+    
     const { error } = await supabase
       .from("companies")
-      .insert([{ name: newCompanyName }]);
+      .insert([{ 
+        name: newCompanyName,
+        subscription_status: status,
+        subscription_ends_at: endsAt,
+        is_locked: startLocked,
+        amount_paid: 0
+      }]);
 
     if (error) {
       console.error("Database Insert Error:", error);
       alert(`Failed to create company: ${error.message}`);
     } else {
       setNewCompanyName("");
+      setPlanType("trial_1");
       setShowAddModal(false);
       fetchCompanies();
     }
@@ -242,6 +264,18 @@ export default function ManageCompaniesPage() {
                 <div>
                   <Label>Company / Building Name</Label>
                   <Input required placeholder="e.g. Skyline Towers" value={newCompanyName} onChange={(e) => setNewCompanyName(e.target.value)} />
+                </div>
+                <div>
+                  <Label>Initial Subscription Plan</Label>
+                  <select
+                    value={planType}
+                    onChange={(e) => setPlanType(e.target.value as any)}
+                    className="w-full mt-1 border border-zinc-300 rounded-md p-2.5 bg-white text-sm focus:ring-2 focus:ring-amber-500 outline-none"
+                  >
+                    <option value="trial_1">1 Month Free Trial</option>
+                    <option value="trial_2">2 Months Free Trial</option>
+                    <option value="none">No Trial (Starts Unpaid & Locked)</option>
+                  </select>
                 </div>
                 <div className="pt-4">
                   <Button type="submit" className="w-full bg-zinc-900 hover:bg-zinc-800" disabled={isSubmitting}>
