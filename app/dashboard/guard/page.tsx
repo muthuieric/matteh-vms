@@ -1,13 +1,12 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Table,
   TableBody,
@@ -16,7 +15,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Camera, Loader2, X, UserCircle, ScanLine, LogOut } from "lucide-react";
+import { X, UserCircle, LogOut, Search, Clock, CheckCircle2, UserPlus } from "lucide-react";
+
+// Import the new modal component
+import AddVisitorModal from "@/components/AddVisitorModal";
 
 type Visitor = {
   id: string;
@@ -39,6 +41,10 @@ export default function GuardDashboard() {
   // State to securely hold the logged-in guard's assigned building/company
   const [companyId, setCompanyId] = useState<string | null>(null);
   
+  // Search and Filter State
+  const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "checked_in">("all");
+
   // Dynamic Form Rules
   const [requirePhoto, setRequirePhoto] = useState<boolean>(false);
   const [askPhone, setAskPhone] = useState<boolean>(true);
@@ -50,21 +56,10 @@ export default function GuardDashboard() {
 
   // Add Visitor Modal State
   const [showAddModal, setShowAddModal] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [newVisitor, setNewVisitor] = useState({ name: "", phone: "", id_number: "", doc_type: "National ID" });
-  
-  // Selfie State
-  const [selfieFile, setSelfieFile] = useState<File | null>(null);
-  const [selfiePreview, setSelfiePreview] = useState<string | null>(null);
-  const selfieInputRef = useRef<HTMLInputElement>(null);
 
   // Image Enlarger State
   const [enlargedPhoto, setEnlargedPhoto] = useState<string | null>(null);
   
-  // OCR Camera State
-  const [isScanning, setIsScanning] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
   useEffect(() => {
     const initializeDashboard = async () => {
       // 1. Get the currently logged-in guard's authentication session
@@ -157,108 +152,6 @@ export default function GuardDashboard() {
     router.push("/login");
   };
 
-  // --- OCR SCANNING LOGIC ---
-  const handleImageCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setIsScanning(true);
-
-    try {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onloadend = async () => {
-        const base64data = reader.result;
-        const response = await fetch("/api/ocr", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ imageBase64: base64data }),
-        });
-
-        const result = await response.json();
-
-        if (result.success && result.data) {
-          setNewVisitor((prev) => ({
-            ...prev,
-            name: result.data.FullName || prev.name,
-            id_number: result.data.IDNumber || prev.id_number,
-          }));
-        } else {
-          alert("Could not read the ID clearly. Please type it manually.");
-        }
-        setIsScanning(false);
-      };
-    } catch (error) {
-      console.error(error);
-      setIsScanning(false);
-      alert("Error scanning ID. Please try manually.");
-    }
-  };
-
-  // --- ADD VISITOR LOGIC ---
-  const handleAddVisitor = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!companyId) {
-      alert("Could not identify your building assignment. Please refresh the page.");
-      return;
-    }
-
-    if (requirePhoto && !selfieFile) {
-      alert("A security photo is required by building management.");
-      return;
-    }
-
-    setIsSubmitting(true);
-    let uploadedPhotoUrl = null;
-
-    try {
-      // 1. Upload Selfie to Cloudflare R2 if present
-      if (selfieFile) {
-        const formDataPayload = new FormData();
-        formDataPayload.append("file", selfieFile);
-        formDataPayload.append("companyId", companyId);
-
-        const uploadRes = await fetch("/api/upload", {
-          method: "POST",
-          body: formDataPayload,
-        });
-        
-        const uploadData = await uploadRes.json();
-        if (uploadData.success) {
-          uploadedPhotoUrl = uploadData.url;
-        } else {
-          throw new Error("Failed to securely upload security photo.");
-        }
-      }
-
-      // 2. Insert Visitor Record
-      const { error } = await supabase.from("visitors").insert([
-        {
-          company_id: companyId,
-          name: newVisitor.name,
-          phone: askPhone ? newVisitor.phone : null,
-          document_type: askId ? newVisitor.doc_type : null,
-          id_number: askId ? newVisitor.id_number : null,
-          status: "pending",
-          photo_url: uploadedPhotoUrl
-        }
-      ]);
-
-      if (error) throw error;
-
-      setShowAddModal(false);
-      setNewVisitor({ name: "", phone: "", id_number: "", doc_type: "National ID" });
-      setSelfieFile(null);
-      setSelfiePreview(null);
-    } catch (err: any) {
-      console.error(err);
-      alert(err.message || "Failed to add visitor.");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
   // --- OTP LOGIC ---
   const handleSendOTP = async (id: string, phone: string) => {
     let code = "";
@@ -297,6 +190,19 @@ export default function GuardDashboard() {
     await supabase.from("visitors").update({ status: "checked_out", checked_out_at: new Date().toISOString() }).eq("id", id);
   };
 
+  // --- UI Calculated Variables with Search & Status Filter ---
+  const filteredVisitors = visitors.filter((v) => {
+    const matchesSearch = v.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          v.phone?.includes(searchTerm) ||
+                          v.id_number?.includes(searchTerm);
+    const matchesStatus = statusFilter === "all" || v.status === statusFilter;
+    return matchesSearch && matchesStatus;
+  });
+  
+  const totalToday = visitors.length;
+  const checkedInCount = visitors.filter(v => v.status === "checked_in").length;
+  const pendingCount = visitors.filter(v => v.status === "pending").length;
+
   if (!companyId && !loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-zinc-50">
@@ -310,237 +216,195 @@ export default function GuardDashboard() {
       <div className="max-w-6xl mx-auto space-y-6">
         
         {/* Header Section */}
-        <div className="flex justify-between items-center">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
             <h1 className="text-3xl font-bold text-zinc-900">Gate Dashboard</h1>
             <p className="text-zinc-500">Live visitor monitoring and verification.</p>
           </div>
-          <div className="flex items-center gap-3">
-            <Button variant="outline" onClick={handleLogout} className="border-zinc-200 text-zinc-600 hover:bg-red-50 hover:text-red-600 hover:border-red-200">
+          <div className="flex items-center gap-3 w-full sm:w-auto">
+            <Button variant="outline" onClick={handleLogout} className="flex-1 sm:flex-initial border-zinc-200 text-zinc-600 hover:bg-red-50 hover:text-red-600 hover:border-red-200">
               <LogOut className="w-4 h-4 mr-2" /> Sign Out
             </Button>
-            <Button onClick={() => setShowAddModal(true)} className="bg-blue-600 hover:bg-blue-700">
-              + New Visitor
+            <Button onClick={() => setShowAddModal(true)} className="flex-1 sm:flex-initial bg-blue-600 hover:bg-blue-700">
+              <UserPlus className="w-4 h-4 mr-2 hidden sm:inline-block" /> + New Visitor
             </Button>
           </div>
         </div>
 
+        {/* Dashboard Stats */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+          <Card>
+            <CardContent className="p-6 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-zinc-500">Total Today</p>
+                <h3 className="text-3xl font-bold text-zinc-900 mt-1">{totalToday}</h3>
+              </div>
+              <div className="p-3 bg-zinc-100 text-zinc-600 rounded-full">
+                <UserPlus className="w-6 h-6" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-6 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-zinc-500">Pending</p>
+                <h3 className="text-3xl font-bold text-zinc-900 mt-1">{pendingCount}</h3>
+              </div>
+              <div className="p-3 bg-amber-100 text-amber-600 rounded-full">
+                <Clock className="w-6 h-6" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-6 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-zinc-500">Checked In</p>
+                <h3 className="text-3xl font-bold text-zinc-900 mt-1">{checkedInCount}</h3>
+              </div>
+              <div className="p-3 bg-green-100 text-green-600 rounded-full">
+                <CheckCircle2 className="w-6 h-6" />
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
         {/* Live Visitor Table */}
         <Card>
-          <CardHeader>
-            <CardTitle>Today's Active Visitors</CardTitle>
+          <CardHeader className="flex flex-col gap-4 border-b border-zinc-100 pb-4">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 w-full">
+              <CardTitle>Today's Active Visitors</CardTitle>
+              
+              <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+                <div className="relative w-full sm:w-64">
+                  <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-zinc-500" />
+                  <Input 
+                    placeholder="Search..." 
+                    className="pl-9 w-full"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                  />
+                </div>
+                
+                <div className="flex w-full sm:w-auto bg-zinc-100 p-1 rounded-md border border-zinc-200 overflow-x-auto">
+                  <button
+                    onClick={() => setStatusFilter("all")}
+                    className={`flex-1 sm:flex-none px-4 py-1.5 text-sm font-medium rounded transition-colors whitespace-nowrap ${statusFilter === "all" ? "bg-white shadow-sm text-zinc-900" : "text-zinc-500 hover:text-zinc-900"}`}
+                  >
+                    All
+                  </button>
+                  <button
+                    onClick={() => setStatusFilter("pending")}
+                    className={`flex-1 sm:flex-none px-4 py-1.5 text-sm font-medium rounded transition-colors whitespace-nowrap ${statusFilter === "pending" ? "bg-white shadow-sm text-amber-700" : "text-zinc-500 hover:text-zinc-900"}`}
+                  >
+                    Pending
+                  </button>
+                  <button
+                    onClick={() => setStatusFilter("checked_in")}
+                    className={`flex-1 sm:flex-none px-4 py-1.5 text-sm font-medium rounded transition-colors whitespace-nowrap ${statusFilter === "checked_in" ? "bg-white shadow-sm text-green-700" : "text-zinc-500 hover:text-zinc-900"}`}
+                  >
+                    Checked In
+                  </button>
+                </div>
+              </div>
+            </div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="pt-6">
             {loading ? (
               <p className="text-zinc-500 py-4">Loading secure data...</p>
-            ) : visitors.length === 0 ? (
-              <p className="text-zinc-500 py-4">No active visitors at the moment.</p>
+            ) : filteredVisitors.length === 0 ? (
+              <p className="text-zinc-500 py-4">No active visitors match your search.</p>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Time</TableHead>
-                    <TableHead>Visitor Details</TableHead>
-                    <TableHead>Phone & ID</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Action</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {visitors.map((visitor) => (
-                    <TableRow key={visitor.id}>
-                      <TableCell className="font-medium text-zinc-500">
-                        {new Date(visitor.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                      </TableCell>
-                      
-                      {/* Photo and Name Column */}
-                      <TableCell>
-                        <div className="flex items-center gap-3">
-                          {visitor.photo_url ? (
-                            <Image 
-                              src={visitor.photo_url} 
-                              alt={`${visitor.name}'s photo`} 
-                              width={40}
-                              height={40}
-                              className="w-10 h-10 rounded-full object-cover border-2 border-zinc-200 cursor-pointer hover:opacity-80 transition-opacity"
-                              onClick={() => setEnlargedPhoto(visitor.photo_url!)}
-                              unoptimized
-                            />
-                          ) : (
-                            <div className="w-10 h-10 rounded-full bg-zinc-100 flex items-center justify-center border-2 border-zinc-200 text-zinc-400">
-                              <UserCircle className="w-6 h-6" />
-                            </div>
-                          )}
-                          <span className="font-semibold">{visitor.name}</span>
-                        </div>
-                      </TableCell>
-
-                      <TableCell>
-                        <div className="text-sm">{visitor.phone || "—"}</div>
-                        <div className="text-xs text-zinc-500">{visitor.id_number || "No ID"}</div>
-                      </TableCell>
-                      
-                      <TableCell>
-                        {visitor.status === "pending" ? (
-                          <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800">Pending</span>
-                        ) : (
-                          <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-semibold text-green-800">Checked In</span>
-                        )}
-                      </TableCell>
-
-                      <TableCell className="text-right">
-                        {visitor.status === "pending" ? (
-                          verifyingId === visitor.id ? (
-                            <div className="flex items-center justify-end gap-2">
-                              <input 
-                                type="text" maxLength={4} placeholder="OTP"
-                                className="w-16 rounded border px-2 py-1 text-center text-sm"
-                                value={otpInput} onChange={(e) => setOtpInput(e.target.value)}
-                              />
-                              <Button size="sm" onClick={() => handleConfirmOTP(visitor)}>Confirm</Button>
-                              <Button size="sm" variant="ghost" onClick={() => setVerifyingId(null)}>Cancel</Button>
-                            </div>
-                          ) : (
-                            <Button size="sm" onClick={() => handleSendOTP(visitor.id, visitor.phone)}>Verify & Send OTP</Button>
-                          )
-                        ) : (
-                          <Button size="sm" variant="secondary" onClick={() => handleCheckOut(visitor.id)}>Check Out</Button>
-                        )}
-                      </TableCell>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Time</TableHead>
+                      <TableHead>Visitor Details</TableHead>
+                      <TableHead>Phone & ID</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Action</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredVisitors.map((visitor) => (
+                      <TableRow key={visitor.id}>
+                        <TableCell className="font-medium text-zinc-500">
+                          {new Date(visitor.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        </TableCell>
+                        
+                        {/* Photo and Name Column */}
+                        <TableCell>
+                          <div className="flex items-center gap-3">
+                            {visitor.photo_url ? (
+                              <Image 
+                                src={visitor.photo_url} 
+                                alt={`${visitor.name}'s photo`} 
+                                width={40}
+                                height={40}
+                                className="w-10 h-10 rounded-full object-cover border-2 border-zinc-200 cursor-pointer hover:opacity-80 transition-opacity"
+                                onClick={() => setEnlargedPhoto(visitor.photo_url!)}
+                                unoptimized
+                              />
+                            ) : (
+                              <div className="w-10 h-10 rounded-full bg-zinc-100 flex items-center justify-center border-2 border-zinc-200 text-zinc-400">
+                                <UserCircle className="w-6 h-6" />
+                              </div>
+                            )}
+                            <span className="font-semibold whitespace-nowrap">{visitor.name}</span>
+                          </div>
+                        </TableCell>
+
+                        <TableCell>
+                          <div className="text-sm">{visitor.phone || "—"}</div>
+                          <div className="text-xs text-zinc-500">{visitor.id_number || "No ID"}</div>
+                        </TableCell>
+                        
+                        <TableCell>
+                          {visitor.status === "pending" ? (
+                            <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800 whitespace-nowrap">Pending</span>
+                          ) : (
+                            <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-semibold text-green-800 whitespace-nowrap">Checked In</span>
+                          )}
+                        </TableCell>
+
+                        <TableCell className="text-right">
+                          {visitor.status === "pending" ? (
+                            verifyingId === visitor.id ? (
+                              <div className="flex items-center justify-end gap-2">
+                                <input 
+                                  type="text" maxLength={4} placeholder="OTP"
+                                  className="w-16 rounded border px-2 py-1 text-center text-sm"
+                                  value={otpInput} onChange={(e) => setOtpInput(e.target.value)}
+                                />
+                                <Button size="sm" onClick={() => handleConfirmOTP(visitor)}>Confirm</Button>
+                                <Button size="sm" variant="ghost" onClick={() => setVerifyingId(null)}>Cancel</Button>
+                              </div>
+                            ) : (
+                              <Button size="sm" onClick={() => handleSendOTP(visitor.id, visitor.phone)} className="whitespace-nowrap">Verify & Send OTP</Button>
+                            )
+                          ) : (
+                            <Button size="sm" variant="secondary" onClick={() => handleCheckOut(visitor.id)} className="whitespace-nowrap">Check Out</Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             )}
           </CardContent>
         </Card>
       </div>
 
-      {/* --- ADD VISITOR MODAL --- */}
-      {showAddModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <Card className="w-full max-w-md shadow-2xl relative max-h-[90vh] overflow-y-auto">
-            <button onClick={() => setShowAddModal(false)} className="absolute top-4 right-4 text-zinc-400 hover:text-black">
-              <X size={20} />
-            </button>
-            <CardHeader>
-              <CardTitle>Register Visitor</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {/* HIDDEN FILE INPUT FOR ID CARD (Triggers Camera on mobile) */}
-              <input 
-                type="file" accept="image/*" capture="environment" 
-                className="hidden" ref={fileInputRef} onChange={handleImageCapture} 
-              />
-              
-              <Button 
-                variant="outline" 
-                className="w-full mb-6 border-dashed border-2 py-8 text-blue-600 border-blue-200 bg-blue-50 hover:bg-blue-100"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isScanning}
-              >
-                {isScanning ? (
-                  <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Analyzing ID Card...</>
-                ) : (
-                  <><ScanLine className="mr-2 h-5 w-5" /> Auto-Fill using ID Card</>
-                )}
-              </Button>
-
-              <div className="relative mb-6">
-                <div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div>
-                <div className="relative flex justify-center text-xs uppercase"><span className="bg-white px-2 text-zinc-500">Or enter manually</span></div>
-              </div>
-
-              <form onSubmit={handleAddVisitor} className="space-y-4">
-                <div>
-                  <Label>Full Name</Label>
-                  <Input required value={newVisitor.name} onChange={(e) => setNewVisitor({...newVisitor, name: e.target.value})} placeholder="e.g. John Doe" />
-                </div>
-
-                {/* DYNAMIC FIELD: PHONE */}
-                {askPhone && (
-                  <div>
-                    <Label>Phone Number</Label>
-                    <Input required type="tel" value={newVisitor.phone} onChange={(e) => setNewVisitor({...newVisitor, phone: e.target.value})} placeholder="0700000000" />
-                  </div>
-                )}
-
-                {/* DYNAMIC FIELDS: ID DOCUMENTS */}
-                {askId && (
-                  <>
-                    <div>
-                      <Label>Document Type</Label>
-                      <select
-                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
-                        value={newVisitor.doc_type}
-                        onChange={(e) => setNewVisitor({...newVisitor, doc_type: e.target.value})}
-                      >
-                        <option value="National ID">National ID</option>
-                        <option value="Passport">Passport</option>
-                        <option value="Driver's License">Driver's License</option>
-                      </select>
-                    </div>
-                    <div>
-                      <Label>ID / Document Number</Label>
-                      <Input value={newVisitor.id_number} onChange={(e) => setNewVisitor({...newVisitor, id_number: e.target.value})} placeholder="Optional if scanning" />
-                    </div>
-                  </>
-                )}
-
-                {/* SECURITY PHOTO - ONLY VISIBLE IF ADMIN TOGGLED IT ON */}
-                {requirePhoto && (
-                  <div className="space-y-3 pt-2">
-                    <Label className="flex justify-between items-center">
-                      Security Photo
-                      <span className="text-xs text-red-500 font-semibold">* Required</span>
-                    </Label>
-                    
-                    <div className="flex items-center gap-4">
-                      <div className="w-16 h-16 rounded-full bg-zinc-100 border-2 border-dashed border-zinc-300 flex items-center justify-center overflow-hidden shrink-0">
-                        {selfiePreview ? (
-                          <Image 
-                            src={selfiePreview} 
-                            alt="Selfie preview" 
-                            width={64}
-                            height={64}
-                            className="w-full h-full object-cover" 
-                            unoptimized
-                          />
-                        ) : (
-                          <UserCircle className="w-8 h-8 text-zinc-300" />
-                        )}
-                      </div>
-                      
-                      <div className="flex-1">
-                        <input 
-                          type="file" accept="image/*" capture="user" 
-                          className="hidden" ref={selfieInputRef} onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) {
-                              setSelfieFile(file);
-                              setSelfiePreview(URL.createObjectURL(file));
-                            }
-                          }} 
-                        />
-                        <Button 
-                          type="button" variant="secondary" className="w-full text-xs bg-zinc-100 hover:bg-zinc-200"
-                          onClick={() => selfieInputRef.current?.click()}
-                        >
-                          <Camera className="w-4 h-4 mr-2" /> Take Photo
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                <Button type="submit" className="w-full mt-4" disabled={isSubmitting}>
-                  {isSubmitting ? "Processing..." : "Add to Pending List"}
-                </Button>
-              </form>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+      {/* --- ADD VISITOR MODAL COMPONENT --- */}
+      <AddVisitorModal 
+        isOpen={showAddModal} 
+        onClose={() => setShowAddModal(false)}
+        companyId={companyId}
+        requirePhoto={requirePhoto}
+        askPhone={askPhone}
+        askId={askId}
+      />
 
       {/* --- ENLARGED PHOTO LIGHTBOX MODAL --- */}
       {enlargedPhoto && (

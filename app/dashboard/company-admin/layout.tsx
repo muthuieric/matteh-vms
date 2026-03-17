@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { LayoutDashboard, QrCode, Shield, LogOut, AlertOctagon, CreditCard, Loader2, Settings } from "lucide-react";
+import { LayoutDashboard, QrCode, Shield, LogOut, AlertOctagon, CreditCard, Loader2, Settings, Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -18,6 +18,9 @@ export default function CompanyAdminLayout({ children }: { children: React.React
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [isPaying, setIsPaying] = useState(false);
   const [monthsToPay, setMonthsToPay] = useState(1);
+  
+  // Mobile Menu State
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   useEffect(() => {
     const verifyAccountStatus = async () => {
@@ -91,10 +94,8 @@ export default function CompanyAdminLayout({ children }: { children: React.React
     }
   };
 
-  // FIX: Check if the user is currently on the payment-success page
   const isPaymentSuccessPage = pathname.includes("/payment-success");
 
-  // FIX: Only show the lockout screen if they are NOT on the success page
   if (isLocked && !isPaymentSuccessPage) {
     return (
       <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4">
@@ -160,15 +161,100 @@ export default function CompanyAdminLayout({ children }: { children: React.React
   }
 
   return (
-    <div className="flex min-h-screen bg-zinc-50">
+    <div className="flex flex-col md:flex-row min-h-screen bg-zinc-50">
       
-      <aside className="w-64 bg-white border-r border-zinc-200 hidden md:flex flex-col shadow-sm z-10">
+      {/* --- MOBILE TOP BAR --- */}
+      <div className="md:hidden flex items-center justify-between bg-white border-b border-zinc-200 p-4 sticky top-0 z-30 shadow-sm">
+        <div>
+          <h2 className="text-lg font-extrabold text-zinc-900 tracking-tight">VMS Portal</h2>
+          <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mt-0.5">Admin Dashboard</p>
+        </div>
+        <button 
+          onClick={() => setIsMobileMenuOpen(true)}
+          className="p-2 text-zinc-600 hover:bg-zinc-100 rounded-md transition-colors"
+        >
+          <Menu size={24} />
+        </button>
+      </div>
+
+      {/* --- MOBILE NAVIGATION DRAWER --- */}
+      {isMobileMenuOpen && (
+        <div className="fixed inset-0 z-50 flex md:hidden">
+          {/* Backdrop blur */}
+          <div 
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm" 
+            onClick={() => setIsMobileMenuOpen(false)} 
+          />
+          {/* Drawer Menu */}
+          <div className="relative w-72 max-w-[80%] bg-white h-full shadow-2xl flex flex-col animate-in slide-in-from-left duration-200">
+            <div className="p-4 border-b border-zinc-200 flex items-center justify-between bg-zinc-50">
+              <h2 className="text-lg font-extrabold text-zinc-900 tracking-tight">Menu</h2>
+              <button 
+                onClick={() => setIsMobileMenuOpen(false)}
+                className="p-2 text-zinc-500 hover:text-zinc-900 bg-zinc-200 hover:bg-zinc-300 rounded-full transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            
+            <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
+              <Link 
+                href="/dashboard/company-admin" 
+                onClick={() => setIsMobileMenuOpen(false)}
+                className={`flex items-center gap-3 px-3 py-3 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100"}`}
+              >
+                <LayoutDashboard size={20} /> Overview
+              </Link>
+              <Link 
+                href="/dashboard/company-admin/qr" 
+                onClick={() => setIsMobileMenuOpen(false)}
+                className={`flex items-center gap-3 px-3 py-3 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/qr" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100"}`}
+              >
+                <QrCode size={20} /> Gate QR Code
+              </Link>
+              <Link 
+                href="/dashboard/company-admin/guards" 
+                onClick={() => setIsMobileMenuOpen(false)}
+                className={`flex items-center gap-3 px-3 py-3 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/guards" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100"}`}
+              >
+                <Shield size={20} /> Security Team
+              </Link>
+              <Link 
+                href="/dashboard/company-admin/billing" 
+                onClick={() => setIsMobileMenuOpen(false)}
+                className={`flex items-center gap-3 px-3 py-3 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/billing" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100"}`}
+              >
+                <CreditCard size={20} /> Billing
+              </Link>
+              <Link 
+                href="/dashboard/company-admin/settings" 
+                onClick={() => setIsMobileMenuOpen(false)}
+                className={`flex items-center gap-3 px-3 py-3 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/settings" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100"}`}
+              >
+                <Settings size={20} /> Settings
+              </Link>
+            </nav>
+
+            <div className="p-4 border-t border-zinc-200">
+              <button 
+                onClick={handleLogout}
+                className="flex items-center gap-3 px-3 py-3 w-full text-zinc-600 rounded-md hover:bg-red-50 hover:text-red-600 transition-colors font-medium text-sm"
+              >
+                <LogOut size={20} /> Sign Out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- DESKTOP SIDEBAR --- */}
+      <aside className="w-64 bg-white border-r border-zinc-200 hidden md:flex flex-col shadow-sm z-10 sticky top-0 h-screen">
         <div className="p-6 border-b border-zinc-200">
           <h2 className="text-xl font-extrabold text-zinc-900 tracking-tight">VMS Portal</h2>
           <p className="text-xs text-zinc-500 font-medium uppercase tracking-wider mt-1">Admin Dashboard</p>
         </div>
         
-        <nav className="flex-1 p-4 space-y-2">
+        <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
           <Link 
             href="/dashboard/company-admin" 
             className={`flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100"}`}
@@ -211,7 +297,8 @@ export default function CompanyAdminLayout({ children }: { children: React.React
         </div>
       </aside>
 
-      <main className="flex-1 overflow-y-auto relative">
+      {/* --- MAIN PAGE CONTENT --- */}
+      <main className="flex-1 w-full relative">
         {children}
       </main>
 
