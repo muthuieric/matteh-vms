@@ -29,6 +29,7 @@ type Visitor = {
 
 export default function AdminDashboard() {
   const [visitors, setVisitors] = useState<Visitor[]>([]);
+  const [lifetimeVisitors, setLifetimeVisitors] = useState(0);
   const [loading, setLoading] = useState(true);
   
   // Filter States
@@ -39,7 +40,7 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     const fetchInitialData = async () => {
-      // Fetch up to 2000 visitors so historical date filtering works properly
+      // 1. Fetch up to 2000 visitors so historical date filtering works properly in the table
       const { data, error } = await supabase
         .from("visitors")
         .select("*")
@@ -51,6 +52,16 @@ export default function AdminDashboard() {
       } else {
         setVisitors(data || []);
       }
+
+      // 2. Fetch the exact lifetime count for the all-time stat card (bypasses the 2000 limit)
+      const { count, error: countError } = await supabase
+        .from("visitors")
+        .select("*", { count: "exact", head: true });
+
+      if (!countError && count !== null) {
+        setLifetimeVisitors(count);
+      }
+
       setLoading(false);
     };
 
@@ -65,12 +76,14 @@ export default function AdminDashboard() {
         (payload) => {
           if (payload.eventType === "INSERT") {
             setVisitors((prev) => [payload.new as Visitor, ...prev]);
+            setLifetimeVisitors((prev) => prev + 1); // Instantly update lifetime count
           } else if (payload.eventType === "UPDATE") {
             setVisitors((prev) =>
               prev.map((v) => (v.id === payload.new.id ? (payload.new as Visitor) : v))
             );
           } else if (payload.eventType === "DELETE") {
             setVisitors((prev) => prev.filter((v) => v.id !== payload.old.id));
+            setLifetimeVisitors((prev) => Math.max(0, prev - 1)); // Deduct from lifetime count safely
           }
         }
       )
@@ -179,7 +192,7 @@ export default function AdminDashboard() {
         </div>
 
         {/* Analytics Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
           <Card className="border-t-4 border-t-blue-600 shadow-sm">
             <CardHeader className="pb-2">
               <CardTitle className="text-xs md:text-sm font-medium text-zinc-500 uppercase tracking-wider">Total Visitors Today</CardTitle>
@@ -198,13 +211,24 @@ export default function AdminDashboard() {
             </CardContent>
           </Card>
 
-          <Card className="border-t-4 border-t-purple-600 shadow-sm sm:col-span-2 md:col-span-1">
+          <Card className="border-t-4 border-t-purple-600 shadow-sm">
             <CardHeader className="pb-2">
               <CardTitle className="text-xs md:text-sm font-medium text-zinc-500 uppercase tracking-wider">Active Gate Alerts</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-3xl md:text-4xl font-bold text-purple-600">
                 {visitors.filter(v => v.status === "pending").length}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-t-4 border-t-zinc-900 shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-xs md:text-sm font-medium text-zinc-500 uppercase tracking-wider">Lifetime Visitors</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl md:text-4xl font-bold text-zinc-900">
+                {lifetimeVisitors.toLocaleString()}
               </div>
             </CardContent>
           </Card>

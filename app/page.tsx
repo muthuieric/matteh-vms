@@ -1,128 +1,117 @@
 import Link from "next/link";
-import { ShieldCheck, QrCode, Smartphone, Lock, ArrowRight, Building2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ShieldCheck, QrCode, LayoutDashboard, Users, ArrowRight, CheckCircle2 } from "lucide-react";
 
-export default function HomePage() {
+export default function LandingPage() {
   return (
-    <div className="min-h-screen bg-zinc-50 flex flex-col font-sans">
+    <div className="min-h-screen bg-zinc-50 selection:bg-blue-100 selection:text-blue-900 font-sans overflow-hidden relative">
       
-      {/* Navigation Bar */}
-      <nav className="flex items-center justify-between p-6 md:px-12 bg-white border-b border-zinc-200 sticky top-0 z-50">
-        <div className="flex items-center gap-2">
-          <div className="bg-blue-600 p-2 rounded-lg">
-            <ShieldCheck className="h-6 w-6 text-white" />
+      {/* --- ENHANCED BACKGROUND --- */}
+      <div className="absolute inset-0 z-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px]"></div>
+      <div className="absolute top-[-10%] left-[-10%] h-[500px] w-[500px] rounded-full bg-blue-400/10 blur-[100px] pointer-events-none" />
+      <div className="absolute bottom-[-10%] right-[-10%] h-[500px] w-[500px] rounded-full bg-zinc-400/20 blur-[100px] pointer-events-none" />
+      {/* --------------------------- */}
+
+      {/* --- NAVBAR --- */}
+      <nav className="relative z-10 container mx-auto px-6 py-6 flex justify-between items-center max-w-7xl">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-zinc-900 rounded-xl flex items-center justify-center shadow-md">
+            <ShieldCheck className="w-6 h-6 text-white" />
           </div>
-          <span className="text-xl font-extrabold text-zinc-900 tracking-tight">VMS Global</span>
+          <span className="text-xl font-bold text-zinc-900 tracking-tight">VMS Global</span>
         </div>
         <div>
           <Link href="/login">
-            <Button variant="outline" className="font-bold border-zinc-300 text-zinc-700 hover:bg-zinc-100">
+            <Button variant="outline" className="border-zinc-200 text-zinc-900 hover:bg-zinc-100 font-bold bg-white/50 backdrop-blur-sm shadow-sm h-10 px-6">
               Sign In
             </Button>
           </Link>
         </div>
       </nav>
 
-      {/* Hero Section */}
-      <main className="flex-1">
-        <section className="relative py-20 md:py-32 overflow-hidden">
-          <div className="max-w-6xl mx-auto px-6 text-center space-y-8 relative z-10">
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-50 border border-blue-100 text-blue-700 text-sm font-semibold mb-4 animate-in fade-in slide-in-from-bottom-4 duration-700">
-              <span className="flex h-2 w-2 rounded-full bg-blue-600 animate-pulse"></span>
-              Next-Generation Gate Security
-            </div>
-            
-            <h1 className="text-5xl md:text-7xl font-black text-zinc-900 tracking-tight max-w-4xl mx-auto leading-tight animate-in fade-in slide-in-from-bottom-6 duration-700 delay-100">
-              Modernize your building's <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-indigo-600">visitor experience.</span>
-            </h1>
-            
-            <p className="text-lg md:text-xl text-zinc-500 max-w-2xl mx-auto font-medium animate-in fade-in slide-in-from-bottom-8 duration-700 delay-200">
-              Ditch the paper logbooks. VMS Global offers lightning-fast QR check-ins, AI-powered ID scanning, and real-time security dashboards for modern enterprises.
-            </p>
-            
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-8 animate-in fade-in slide-in-from-bottom-10 duration-700 delay-300">
-              <Link href="/login">
-                <Button className="h-14 px-8 text-lg bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-full shadow-lg shadow-blue-600/20 w-full sm:w-auto">
-                  Access Dashboard <ArrowRight className="ml-2 h-5 w-5" />
-                </Button>
-              </Link>
-              <Button variant="outline" className="h-14 px-8 text-lg font-bold rounded-full w-full sm:w-auto border-zinc-300 text-zinc-700 hover:bg-zinc-100">
-                Book a Demo
-              </Button>
-            </div>
-          </div>
+      {/* --- HERO SECTION --- */}
+      <main className="relative z-10 container mx-auto px-6 pt-16 md:pt-24 pb-32 text-center flex flex-col items-center max-w-7xl">
+        
+        {/* Headline */}
+        <h1 className="text-5xl md:text-7xl font-black text-zinc-900 tracking-tight max-w-4xl leading-[1.1] mb-6 animate-in fade-in slide-in-from-bottom-6 duration-700">
+          Modern Security for the <br className="hidden md:block"/>
+          <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-zinc-900">
+            Modern Workspace
+          </span>
+        </h1>
+        
+        {/* Subtitle */}
+        <p className="text-lg md:text-xl text-zinc-500 max-w-2xl mb-10 font-medium animate-in fade-in slide-in-from-bottom-8 duration-700 delay-150 leading-relaxed">
+          Streamline visitor check-ins, generate fast-track QR codes, and monitor building access in real-time with our enterprise-grade platform.
+        </p>
+        
+        {/* CTA Buttons */}
+        <div className="flex flex-col sm:flex-row justify-center gap-4 animate-in fade-in slide-in-from-bottom-10 duration-700 delay-300">
+          <a href="https://forms.google.com/" target="_blank" rel="noopener noreferrer">
+            <Button className="h-14 px-8 text-lg font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-xl hover:shadow-2xl transition-all hover:-translate-y-0.5 active:scale-95 w-full sm:w-auto">
+              Book a Demo <ArrowRight className="ml-2 w-5 h-5" />
+            </Button>
+          </a>
+          <Link href="/login">
+            <Button variant="outline" className="h-14 px-8 text-lg font-bold bg-white border-zinc-200 text-zinc-900 hover:bg-zinc-50 rounded-xl shadow-sm hover:shadow-md transition-all hover:-translate-y-0.5 active:scale-95 w-full sm:w-auto">
+              Sign In
+            </Button>
+          </Link>
+        </div>
+
+        {/* --- FEATURE GRID --- */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8 mt-24 text-left w-full animate-in fade-in slide-in-from-bottom-12 duration-700 delay-500">
           
-          {/* Decorative background elements */}
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-blue-50 rounded-full blur-3xl -z-10 opacity-50"></div>
-        </section>
-
-        {/* Features Section */}
-        <section className="py-20 bg-white border-t border-zinc-100">
-          <div className="max-w-6xl mx-auto px-6">
-            <div className="text-center mb-16">
-              <h2 className="text-3xl md:text-4xl font-bold text-zinc-900">Enterprise-Grade Security Features</h2>
-              <p className="text-zinc-500 mt-4">Everything you need to secure your premises and delight your guests.</p>
+          <div className="bg-white/80 backdrop-blur-md p-8 rounded-3xl border border-zinc-200/60 shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] transition-all">
+            <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center mb-6 border border-blue-100">
+              <QrCode className="w-6 h-6 text-blue-600" />
             </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-              {/* Feature 1 */}
-              <div className="bg-zinc-50 p-8 rounded-2xl border border-zinc-100 hover:shadow-md transition-shadow">
-                <div className="w-14 h-14 bg-blue-100 text-blue-600 rounded-xl flex items-center justify-center mb-6">
-                  <QrCode className="h-7 w-7" />
-                </div>
-                <h3 className="text-xl font-bold text-zinc-900 mb-3">QR Fast-Track</h3>
-                <p className="text-zinc-600 leading-relaxed">
-                  Visitors scan a poster at the gate to register on their own phones, completely eliminating desk queues and shared tablets.
-                </p>
-              </div>
-
-              {/* Feature 2 */}
-              <div className="bg-zinc-50 p-8 rounded-2xl border border-zinc-100 hover:shadow-md transition-shadow">
-                <div className="w-14 h-14 bg-indigo-100 text-indigo-600 rounded-xl flex items-center justify-center mb-6">
-                  <Smartphone className="h-7 w-7" />
-                </div>
-                <h3 className="text-xl font-bold text-zinc-900 mb-3">AI ID Scanning</h3>
-                <p className="text-zinc-600 leading-relaxed">
-                  Guests simply snap a picture of their National ID or Passport. Our AI instantly reads and auto-fills their details flawlessly.
-                </p>
-              </div>
-
-              {/* Feature 3 */}
-              <div className="bg-zinc-50 p-8 rounded-2xl border border-zinc-100 hover:shadow-md transition-shadow">
-                <div className="w-14 h-14 bg-amber-100 text-amber-600 rounded-xl flex items-center justify-center mb-6">
-                  <Lock className="h-7 w-7" />
-                </div>
-                <h3 className="text-xl font-bold text-zinc-900 mb-3">Security Selfies</h3>
-                <p className="text-zinc-600 leading-relaxed">
-                  Mandate security photos for entry. Images are securely stored in the cloud and automatically permanently deleted after 7 days.
-                </p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* CTA Section */}
-        <section className="py-24 bg-zinc-900 text-center px-6">
-          <div className="max-w-3xl mx-auto space-y-8">
-            <Building2 className="h-16 w-16 text-blue-500 mx-auto" />
-            <h2 className="text-4xl font-bold text-white">Ready to secure your building?</h2>
-            <p className="text-xl text-zinc-400">
-              Join top companies using VMS Global to streamline their front desk operations.
+            <h3 className="text-xl font-bold text-zinc-900 mb-3">Smart QR Check-In</h3>
+            <p className="text-zinc-500 font-medium leading-relaxed mb-4">
+              Allow visitors to register instantly using printable QR posters at your entry gates.
             </p>
-            <Link href="/login">
-              <Button className="h-14 px-10 text-lg bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-full mt-4">
-                Get Started Today
-              </Button>
-            </Link>
+            <ul className="space-y-2 text-sm font-semibold text-zinc-700">
+              <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-blue-500"/> Contactless entry</li>
+              <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-blue-500"/> SMS OTP checkout</li>
+            </ul>
           </div>
-        </section>
+
+          <div className="bg-white/80 backdrop-blur-md p-8 rounded-3xl border border-zinc-200/60 shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] transition-all">
+            <div className="w-12 h-12 bg-amber-50 rounded-2xl flex items-center justify-center mb-6 border border-amber-100">
+              <LayoutDashboard className="w-6 h-6 text-amber-600" />
+            </div>
+            <h3 className="text-xl font-bold text-zinc-900 mb-3">Live Guard Dashboard</h3>
+            <p className="text-zinc-500 font-medium leading-relaxed mb-4">
+              Equip your security team with real-time logs, OCR ID scanning, and instant alert verifications.
+            </p>
+            <ul className="space-y-2 text-sm font-semibold text-zinc-700">
+              <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-amber-500"/> Live visitor tracking</li>
+              <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-amber-500"/> ID Auto-fill scanning</li>
+            </ul>
+          </div>
+
+          <div className="bg-white/80 backdrop-blur-md p-8 rounded-3xl border border-zinc-200/60 shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)] transition-all">
+            <div className="w-12 h-12 bg-emerald-50 rounded-2xl flex items-center justify-center mb-6 border border-emerald-100">
+              <Users className="w-6 h-6 text-emerald-600" />
+            </div>
+            <h3 className="text-xl font-bold text-zinc-900 mb-3">Multi-Role Access</h3>
+            <p className="text-zinc-500 font-medium leading-relaxed mb-4">
+              Dedicated workflows and granular permissions for Managers and Guards.
+            </p>
+            <ul className="space-y-2 text-sm font-semibold text-zinc-700">
+              <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-500"/> Role-based dashboards</li>
+              <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-500"/> Secure billing module</li>
+            </ul>
+          </div>
+
+        </div>
       </main>
 
-      {/* Footer */}
-      <footer className="bg-zinc-950 text-zinc-500 py-8 text-center border-t border-zinc-800">
-        <p className="text-sm">
-          &copy; {new Date().getFullYear()} VMS Global Secure Entry. All rights reserved.
-        </p>
+      {/* --- FOOTER --- */}
+      <footer className="relative z-10 border-t border-zinc-200/60 bg-white/50 backdrop-blur-sm py-8">
+        <div className="container mx-auto px-6 text-center text-sm font-semibold text-zinc-400 max-w-7xl">
+          <p>&copy; {new Date().getFullYear()} VMS Global Security. All rights reserved.</p>
+        </div>
       </footer>
     </div>
   );

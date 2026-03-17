@@ -73,8 +73,18 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 p-4">
-      <Card className="w-full max-w-sm shadow-lg border-t-4 border-t-zinc-900">
+    <div className="relative flex min-h-screen items-center justify-center bg-zinc-50 p-4 overflow-hidden">
+      
+      {/* --- ENHANCED BACKGROUND --- */}
+      {/* Subtle Grid Pattern */}
+      <div className="absolute inset-0 z-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px]"></div>
+      
+      {/* Soft Ambient Light Orbs */}
+      <div className="absolute top-[-10%] left-[-10%] h-[500px] w-[500px] rounded-full bg-blue-400/10 blur-[100px] pointer-events-none" />
+      <div className="absolute bottom-[-10%] right-[-10%] h-[500px] w-[500px] rounded-full bg-zinc-400/20 blur-[100px] pointer-events-none" />
+      {/* --------------------------- */}
+
+      <Card className="relative z-10 w-full max-w-sm shadow-2xl border-t-4 border-t-zinc-900 bg-white/95 backdrop-blur-sm">
         <CardHeader className="text-center">
           <CardTitle className="text-2xl font-bold">VMS Portal</CardTitle>
           <CardDescription>

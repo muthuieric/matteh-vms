@@ -212,8 +212,15 @@ export default function GuardDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-50 p-6 relative">
-      <div className="max-w-6xl mx-auto space-y-6">
+    <div className="min-h-screen bg-zinc-50 p-6 relative overflow-x-hidden">
+      
+      {/* --- ENHANCED BACKGROUND --- */}
+      <div className="fixed inset-0 z-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px] pointer-events-none"></div>
+      <div className="fixed top-[-10%] left-[-10%] h-[500px] w-[500px] rounded-full bg-blue-400/10 blur-[100px] pointer-events-none z-0" />
+      <div className="fixed bottom-[-10%] right-[-10%] h-[500px] w-[500px] rounded-full bg-zinc-400/20 blur-[100px] pointer-events-none z-0" />
+      {/* --------------------------- */}
+
+      <div className="max-w-6xl mx-auto space-y-6 relative z-10">
         
         {/* Header Section */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -222,10 +229,10 @@ export default function GuardDashboard() {
             <p className="text-zinc-500">Live visitor monitoring and verification.</p>
           </div>
           <div className="flex items-center gap-3 w-full sm:w-auto">
-            <Button variant="outline" onClick={handleLogout} className="flex-1 sm:flex-initial border-zinc-200 text-zinc-600 hover:bg-red-50 hover:text-red-600 hover:border-red-200">
+            <Button variant="outline" onClick={handleLogout} className="flex-1 sm:flex-initial border-zinc-200 text-zinc-600 hover:bg-red-50 hover:text-red-600 hover:border-red-200 bg-white/80 backdrop-blur-sm">
               <LogOut className="w-4 h-4 mr-2" /> Sign Out
             </Button>
-            <Button onClick={() => setShowAddModal(true)} className="flex-1 sm:flex-initial bg-blue-600 hover:bg-blue-700">
+            <Button onClick={() => setShowAddModal(true)} className="flex-1 sm:flex-initial bg-blue-600 hover:bg-blue-700 shadow-md">
               <UserPlus className="w-4 h-4 mr-2 hidden sm:inline-block" /> + New Visitor
             </Button>
           </div>
@@ -233,35 +240,35 @@ export default function GuardDashboard() {
 
         {/* Dashboard Stats */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-          <Card>
+          <Card className="bg-white/90 backdrop-blur-sm border-zinc-200/60 shadow-sm">
             <CardContent className="p-6 flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-zinc-500">Total Today</p>
                 <h3 className="text-3xl font-bold text-zinc-900 mt-1">{totalToday}</h3>
               </div>
-              <div className="p-3 bg-zinc-100 text-zinc-600 rounded-full">
+              <div className="p-3 bg-zinc-100/80 text-zinc-600 rounded-full">
                 <UserPlus className="w-6 h-6" />
               </div>
             </CardContent>
           </Card>
-          <Card>
+          <Card className="bg-white/90 backdrop-blur-sm border-zinc-200/60 shadow-sm">
             <CardContent className="p-6 flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-zinc-500">Pending</p>
                 <h3 className="text-3xl font-bold text-zinc-900 mt-1">{pendingCount}</h3>
               </div>
-              <div className="p-3 bg-amber-100 text-amber-600 rounded-full">
+              <div className="p-3 bg-amber-100/80 text-amber-600 rounded-full">
                 <Clock className="w-6 h-6" />
               </div>
             </CardContent>
           </Card>
-          <Card>
+          <Card className="bg-white/90 backdrop-blur-sm border-zinc-200/60 shadow-sm">
             <CardContent className="p-6 flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-zinc-500">Checked In</p>
                 <h3 className="text-3xl font-bold text-zinc-900 mt-1">{checkedInCount}</h3>
               </div>
-              <div className="p-3 bg-green-100 text-green-600 rounded-full">
+              <div className="p-3 bg-green-100/80 text-green-600 rounded-full">
                 <CheckCircle2 className="w-6 h-6" />
               </div>
             </CardContent>
@@ -269,8 +276,8 @@ export default function GuardDashboard() {
         </div>
 
         {/* Live Visitor Table */}
-        <Card>
-          <CardHeader className="flex flex-col gap-4 border-b border-zinc-100 pb-4">
+        <Card className="bg-white/90 backdrop-blur-sm border-zinc-200/60 shadow-sm">
+          <CardHeader className="flex flex-col gap-4 border-b border-zinc-100/50 pb-4">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 w-full">
               <CardTitle>Today's Active Visitors</CardTitle>
               
@@ -279,13 +286,13 @@ export default function GuardDashboard() {
                   <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-zinc-500" />
                   <Input 
                     placeholder="Search..." 
-                    className="pl-9 w-full"
+                    className="pl-9 w-full bg-white/80"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                   />
                 </div>
                 
-                <div className="flex w-full sm:w-auto bg-zinc-100 p-1 rounded-md border border-zinc-200 overflow-x-auto">
+                <div className="flex w-full sm:w-auto bg-zinc-100/80 p-1 rounded-md border border-zinc-200/60 overflow-x-auto">
                   <button
                     onClick={() => setStatusFilter("all")}
                     className={`flex-1 sm:flex-none px-4 py-1.5 text-sm font-medium rounded transition-colors whitespace-nowrap ${statusFilter === "all" ? "bg-white shadow-sm text-zinc-900" : "text-zinc-500 hover:text-zinc-900"}`}
@@ -317,7 +324,7 @@ export default function GuardDashboard() {
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
-                    <TableRow>
+                    <TableRow className="border-zinc-200/50">
                       <TableHead>Time</TableHead>
                       <TableHead>Visitor Details</TableHead>
                       <TableHead>Phone & ID</TableHead>
@@ -327,7 +334,7 @@ export default function GuardDashboard() {
                   </TableHeader>
                   <TableBody>
                     {filteredVisitors.map((visitor) => (
-                      <TableRow key={visitor.id}>
+                      <TableRow key={visitor.id} className="border-zinc-200/50 hover:bg-zinc-50/50">
                         <TableCell className="font-medium text-zinc-500">
                           {new Date(visitor.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                         </TableCell>
@@ -341,7 +348,7 @@ export default function GuardDashboard() {
                                 alt={`${visitor.name}'s photo`} 
                                 width={40}
                                 height={40}
-                                className="w-10 h-10 rounded-full object-cover border-2 border-zinc-200 cursor-pointer hover:opacity-80 transition-opacity"
+                                className="w-10 h-10 rounded-full object-cover border-2 border-zinc-200 cursor-pointer hover:opacity-80 transition-opacity bg-white"
                                 onClick={() => setEnlargedPhoto(visitor.photo_url!)}
                                 unoptimized
                               />
@@ -361,9 +368,9 @@ export default function GuardDashboard() {
                         
                         <TableCell>
                           {visitor.status === "pending" ? (
-                            <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800 whitespace-nowrap">Pending</span>
+                            <span className="inline-flex items-center rounded-full bg-amber-100/80 px-2.5 py-0.5 text-xs font-semibold text-amber-800 whitespace-nowrap border border-amber-200/50">Pending</span>
                           ) : (
-                            <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-semibold text-green-800 whitespace-nowrap">Checked In</span>
+                            <span className="inline-flex items-center rounded-full bg-green-100/80 px-2.5 py-0.5 text-xs font-semibold text-green-800 whitespace-nowrap border border-green-200/50">Checked In</span>
                           )}
                         </TableCell>
 
@@ -373,17 +380,17 @@ export default function GuardDashboard() {
                               <div className="flex items-center justify-end gap-2">
                                 <input 
                                   type="text" maxLength={4} placeholder="OTP"
-                                  className="w-16 rounded border px-2 py-1 text-center text-sm"
+                                  className="w-16 rounded border px-2 py-1 text-center text-sm bg-white"
                                   value={otpInput} onChange={(e) => setOtpInput(e.target.value)}
                                 />
                                 <Button size="sm" onClick={() => handleConfirmOTP(visitor)}>Confirm</Button>
                                 <Button size="sm" variant="ghost" onClick={() => setVerifyingId(null)}>Cancel</Button>
                               </div>
                             ) : (
-                              <Button size="sm" onClick={() => handleSendOTP(visitor.id, visitor.phone)} className="whitespace-nowrap">Verify & Send OTP</Button>
+                              <Button size="sm" onClick={() => handleSendOTP(visitor.id, visitor.phone)} className="whitespace-nowrap bg-white hover:bg-zinc-100 text-zinc-900 border border-zinc-200 shadow-sm">Verify & Send OTP</Button>
                             )
                           ) : (
-                            <Button size="sm" variant="secondary" onClick={() => handleCheckOut(visitor.id)} className="whitespace-nowrap">Check Out</Button>
+                            <Button size="sm" variant="secondary" onClick={() => handleCheckOut(visitor.id)} className="whitespace-nowrap bg-white/60 hover:bg-zinc-100 text-zinc-700 shadow-sm">Check Out</Button>
                           )}
                         </TableCell>
                       </TableRow>
