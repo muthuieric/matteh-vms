@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Download, Filter } from "lucide-react";
+import { Download, Filter, Info, X } from "lucide-react";
 
 // Define the shape of our Visitor data
 type Visitor = {
@@ -25,6 +25,9 @@ type Visitor = {
   status: "pending" | "checked_in" | "checked_out" | "auto_checked_out";
   created_at: string;
   checked_out_at?: string;
+  host_name?: string;
+  purpose?: string;
+  vehicle_reg?: string;
 };
 
 export default function AdminDashboard() {
@@ -38,8 +41,30 @@ export default function AdminDashboard() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
 
+  // Modal State
+  const [infoModalVisitor, setInfoModalVisitor] = useState<Visitor | null>(null);
+
   useEffect(() => {
     const fetchInitialData = async () => {
+      // --- AUTO-CHECKOUT SCRIPT ---
+      // Automatically check out any 'pending' or 'checked_in' visitors from previous days
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+
+      try {
+        await supabase
+          .from("visitors")
+          .update({ 
+            status: "auto_checked_out", 
+            checked_out_at: new Date().toISOString() 
+          })
+          .in("status", ["pending", "checked_in"])
+          .lt("created_at", startOfToday.toISOString());
+      } catch (err) {
+        console.error("Auto-checkout script failed:", err);
+      }
+      // ----------------------------
+
       // 1. Fetch up to 2000 visitors so historical date filtering works properly in the table
       const { data, error } = await supabase
         .from("visitors")
@@ -100,8 +125,10 @@ export default function AdminDashboard() {
     const query = searchQuery.toLowerCase();
     const matchesSearch = 
       v.name.toLowerCase().includes(query) ||
-      v.phone.includes(query) ||
-      (v.id_number && v.id_number.toLowerCase().includes(query));
+      v.phone?.includes(query) ||
+      (v.id_number && v.id_number.toLowerCase().includes(query)) ||
+      (v.host_name && v.host_name.toLowerCase().includes(query)) ||
+      (v.vehicle_reg && v.vehicle_reg.toLowerCase().includes(query));
 
     // 2. Status Filter
     const matchesStatus = statusFilter === "all" || v.status === statusFilter;
@@ -131,7 +158,7 @@ export default function AdminDashboard() {
       return;
     }
 
-    const headers = ["Date", "Visitor Name", "Phone Number", "Document Type", "ID Number", "Status", "Time In", "Time Out"];
+    const headers = ["Date", "Visitor Name", "Phone Number", "Document Type", "ID Number", "Host Name", "Purpose", "Vehicle Reg", "Status", "Time In", "Time Out"];
     const csvRows = filteredVisitors.map((v) => {
       const date = new Date(v.created_at).toLocaleDateString();
       const timeIn = new Date(v.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -140,10 +167,13 @@ export default function AdminDashboard() {
       return [
         `"${date}"`,
         `"${v.name}"`,
-        `"${v.phone}"`,
-        `"${v.document_type}"`,
+        `"${v.phone || 'N/A'}"`,
+        `"${v.document_type || 'N/A'}"`,
         `"${v.id_number || 'N/A'}"`,
-        `"${v.status.replace("_", " ").toUpperCase()}"`,
+        `"${v.host_name || 'N/A'}"`,
+        `"${v.purpose || 'N/A'}"`,
+        `"${v.vehicle_reg || 'N/A'}"`,
+        `"${v.status.replace(/_/g, " ").toUpperCase()}"`,
         `"${timeIn}"`,
         `"${timeOut}"`
       ].join(",");
@@ -245,7 +275,7 @@ export default function AdminDashboard() {
               <div className="w-full md:w-80">
                 <label className="text-xs font-semibold text-zinc-500 mb-1.5 block">Search Records</label>
                 <Input
-                  placeholder="Search name, phone, or ID..."
+                  placeholder="Search name, host, or vehicle..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="bg-white h-10 w-full"
@@ -253,15 +283,13 @@ export default function AdminDashboard() {
               </div>
             </div>
 
-            {/* RESPONSIVE FILTERS SECTION - REBUILT WITH GRID */}
+            {/* RESPONSIVE FILTERS SECTION */}
             <div className="bg-zinc-50/50 p-4 rounded-xl border border-zinc-100">
               <div className="flex items-center gap-2 text-sm font-semibold text-zinc-700 mb-4">
                 <Filter className="w-4 h-4 text-zinc-500" /> Filter Options
               </div>
               
-              {/* grid-cols-1 on mobile ensures perfect vertical stacking */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                
                 {/* Status Dropdown */}
                 <div className="space-y-1.5 w-full">
                   <label className="text-xs font-medium text-zinc-500 block">Status</label>
@@ -274,6 +302,7 @@ export default function AdminDashboard() {
                     <option value="pending">Pending</option>
                     <option value="checked_in">Inside (Checked In)</option>
                     <option value="checked_out">Departed (Checked Out)</option>
+                    <option value="auto_checked_out">Auto Checked Out</option>
                   </select>
                 </div>
 
@@ -330,17 +359,30 @@ export default function AdminDashboard() {
                           {new Date(visitor.created_at).toLocaleDateString()}
                         </TableCell>
                         <TableCell>
-                          <div className="font-semibold text-zinc-900 whitespace-nowrap">{visitor.name}</div>
-                          <div className="text-xs text-zinc-500 whitespace-nowrap">{visitor.phone}</div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-zinc-900 whitespace-nowrap">{visitor.name}</span>
+                            {/* INFO BUTTON MODAL TRIGGER */}
+                            {(visitor.host_name || visitor.purpose || visitor.vehicle_reg) && (
+                              <button
+                                onClick={() => setInfoModalVisitor(visitor)}
+                                className="text-blue-600 bg-blue-50 hover:bg-blue-100 p-1.5 rounded-full transition-colors shrink-0 shadow-sm border border-blue-100"
+                                title="View Visit Info"
+                              >
+                                <Info className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                          <div className="text-xs text-zinc-500 whitespace-nowrap">{visitor.phone || "—"}</div>
                         </TableCell>
                         <TableCell>
-                          <div className="text-sm whitespace-nowrap">{visitor.document_type}</div>
+                          <div className="text-sm whitespace-nowrap">{visitor.document_type || "—"}</div>
                           <div className="text-xs text-zinc-500 whitespace-nowrap">{visitor.id_number || "N/A"}</div>
                         </TableCell>
                         <TableCell className="whitespace-nowrap">
                           {visitor.status === "pending" && <span className="text-amber-600 text-xs font-bold uppercase">Pending</span>}
                           {visitor.status === "checked_in" && <span className="text-green-600 text-xs font-bold uppercase">Inside</span>}
                           {visitor.status === "checked_out" && <span className="text-zinc-500 text-xs font-bold uppercase">Departed</span>}
+                          {visitor.status === "auto_checked_out" && <span className="text-purple-600 text-xs font-bold uppercase">Auto-Departed</span>}
                         </TableCell>
                         <TableCell className="text-sm whitespace-nowrap">
                           {new Date(visitor.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -360,6 +402,37 @@ export default function AdminDashboard() {
         </Card>
 
       </div>
+
+      {/* --- EXTRA VISIT INFO MODAL --- */}
+      {infoModalVisitor && (
+        <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4 backdrop-blur-sm">
+          <Card className="w-full max-w-sm shadow-2xl relative border-0 overflow-hidden bg-white">
+            <div className="absolute top-0 left-0 w-full h-1.5 bg-blue-500"></div>
+            <button onClick={() => setInfoModalVisitor(null)} className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-900 bg-zinc-100 hover:bg-zinc-200 rounded-full p-1.5 transition-colors">
+              <X size={18} />
+            </button>
+            <CardHeader className="pt-8 pb-4 border-b border-zinc-100/50">
+              <CardTitle className="text-xl font-bold">Visit Details</CardTitle>
+              <CardDescription>Extra information provided by {infoModalVisitor.name}.</CardDescription>
+            </CardHeader>
+            <CardContent className="p-6 space-y-5 bg-zinc-50/50">
+              <div>
+                <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1">Host Name</p>
+                <p className="font-medium text-zinc-900 text-lg leading-snug">{infoModalVisitor.host_name || "—"}</p>
+              </div>
+              <div>
+                <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1">Purpose of Visit</p>
+                <p className="font-medium text-zinc-900 text-lg leading-snug">{infoModalVisitor.purpose || "—"}</p>
+              </div>
+              <div>
+                <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1">Vehicle Registration</p>
+                <p className="font-mono font-medium text-zinc-900 text-lg leading-snug">{infoModalVisitor.vehicle_reg || "—"}</p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
     </div>
   );
 }

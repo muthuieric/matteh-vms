@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -15,7 +15,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { X, UserCircle, LogOut, Search, Clock, CheckCircle2, UserPlus } from "lucide-react";
+import { X, UserCircle, LogOut, Search, Clock, CheckCircle2, UserPlus, Info } from "lucide-react";
 
 // Import the new modal component
 import AddVisitorModal from "@/components/AddVisitorModal";
@@ -31,6 +31,9 @@ type Visitor = {
   otp_code?: string;
   company_id: string;
   photo_url?: string;
+  host_name?: string;
+  purpose?: string;
+  vehicle_reg?: string;
 };
 
 export default function GuardDashboard() {
@@ -49,16 +52,18 @@ export default function GuardDashboard() {
   const [requirePhoto, setRequirePhoto] = useState<boolean>(false);
   const [askPhone, setAskPhone] = useState<boolean>(true);
   const [askId, setAskId] = useState<boolean>(true);
+  const [askHost, setAskHost] = useState<boolean>(false);
+  const [askPurpose, setAskPurpose] = useState<boolean>(false);
+  const [askVehicle, setAskVehicle] = useState<boolean>(false);
 
   // OTP State
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
   const [otpInput, setOtpInput] = useState("");
 
-  // Add Visitor Modal State
+  // Modals State
   const [showAddModal, setShowAddModal] = useState(false);
-
-  // Image Enlarger State
   const [enlargedPhoto, setEnlargedPhoto] = useState<string | null>(null);
+  const [infoModalVisitor, setInfoModalVisitor] = useState<Visitor | null>(null);
   
   useEffect(() => {
     const initializeDashboard = async () => {
@@ -87,10 +92,10 @@ export default function GuardDashboard() {
       const currentCompanyId = profileData.company_id;
       setCompanyId(currentCompanyId);
 
-      // Fetch company rules (Photo, Phone, ID toggles)
+      // Fetch company rules (Photo, Phone, ID, Host, Purpose, Vehicle toggles)
       const { data: companyData } = await supabase
         .from("companies")
-        .select("require_photo, ask_phone, ask_id")
+        .select("require_photo, ask_phone, ask_id, ask_host, ask_purpose, ask_vehicle")
         .eq("id", currentCompanyId)
         .single();
         
@@ -98,6 +103,9 @@ export default function GuardDashboard() {
         setRequirePhoto(companyData.require_photo || false);
         setAskPhone(companyData.ask_phone !== false);
         setAskId(companyData.ask_id !== false);
+        setAskHost(companyData.ask_host || false);
+        setAskPurpose(companyData.ask_purpose || false);
+        setAskVehicle(companyData.ask_vehicle || false);
       }
 
       // 4. Fetch ONLY the visitors for this specific guard's building
@@ -339,7 +347,7 @@ export default function GuardDashboard() {
                           {new Date(visitor.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                         </TableCell>
                         
-                        {/* Photo and Name Column */}
+                        {/* Photo, Name, and Info Button Column */}
                         <TableCell>
                           <div className="flex items-center gap-3">
                             {visitor.photo_url ? (
@@ -348,16 +356,30 @@ export default function GuardDashboard() {
                                 alt={`${visitor.name}'s photo`} 
                                 width={40}
                                 height={40}
-                                className="w-10 h-10 rounded-full object-cover border-2 border-zinc-200 cursor-pointer hover:opacity-80 transition-opacity bg-white"
+                                className="w-10 h-10 rounded-full object-cover border-2 border-zinc-200 cursor-pointer hover:opacity-80 transition-opacity bg-white shrink-0"
                                 onClick={() => setEnlargedPhoto(visitor.photo_url!)}
                                 unoptimized
                               />
                             ) : (
-                              <div className="w-10 h-10 rounded-full bg-zinc-100 flex items-center justify-center border-2 border-zinc-200 text-zinc-400">
+                              <div className="w-10 h-10 rounded-full bg-zinc-100 flex items-center justify-center border-2 border-zinc-200 text-zinc-400 shrink-0">
                                 <UserCircle className="w-6 h-6" />
                               </div>
                             )}
-                            <span className="font-semibold whitespace-nowrap">{visitor.name}</span>
+                            
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold whitespace-nowrap">{visitor.name}</span>
+                              
+                              {/* VIEW DETAILS BUTTON - ONLY SHOWS IF EXTRA DATA EXISTS */}
+                              {(visitor.host_name || visitor.purpose || visitor.vehicle_reg) && (
+                                <button
+                                  onClick={() => setInfoModalVisitor(visitor)}
+                                  className="text-blue-600 bg-blue-50 hover:bg-blue-100 p-1.5 rounded-full transition-colors shrink-0 shadow-sm border border-blue-100"
+                                  title="View Visit Info"
+                                >
+                                  <Info className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
                           </div>
                         </TableCell>
 
@@ -411,12 +433,45 @@ export default function GuardDashboard() {
         requirePhoto={requirePhoto}
         askPhone={askPhone}
         askId={askId}
+        askHost={askHost}
+        askPurpose={askPurpose}
+        askVehicle={askVehicle}
       />
+
+      {/* --- EXTRA VISIT INFO MODAL --- */}
+      {infoModalVisitor && (
+        <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4 backdrop-blur-sm">
+          <Card className="w-full max-w-sm shadow-2xl relative border-0 overflow-hidden bg-white">
+            <div className="absolute top-0 left-0 w-full h-1.5 bg-blue-500"></div>
+            <button onClick={() => setInfoModalVisitor(null)} className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-900 bg-zinc-100 hover:bg-zinc-200 rounded-full p-1.5 transition-colors">
+              <X size={18} />
+            </button>
+            <CardHeader className="pt-8 pb-4 border-b border-zinc-100/50">
+              <CardTitle className="text-xl font-bold">Visit Details</CardTitle>
+              <CardDescription>Extra information provided by {infoModalVisitor.name}.</CardDescription>
+            </CardHeader>
+            <CardContent className="p-6 space-y-5 bg-zinc-50/50">
+              <div>
+                <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1">Host Name</p>
+                <p className="font-medium text-zinc-900 text-lg leading-snug">{infoModalVisitor.host_name || "—"}</p>
+              </div>
+              <div>
+                <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1">Purpose of Visit</p>
+                <p className="font-medium text-zinc-900 text-lg leading-snug">{infoModalVisitor.purpose || "—"}</p>
+              </div>
+              <div>
+                <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1">Vehicle Registration</p>
+                <p className="font-mono font-medium text-zinc-900 text-lg leading-snug">{infoModalVisitor.vehicle_reg || "—"}</p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* --- ENLARGED PHOTO LIGHTBOX MODAL --- */}
       {enlargedPhoto && (
         <div 
-          className="fixed inset-0 bg-black/90 z-[60] flex flex-col items-center justify-center p-4 cursor-pointer backdrop-blur-sm" 
+          className="fixed inset-0 bg-black/90 z-[80] flex flex-col items-center justify-center p-4 cursor-pointer backdrop-blur-sm" 
           onClick={() => setEnlargedPhoto(null)}
         >
           <div className="relative max-w-2xl w-full flex flex-col items-center">

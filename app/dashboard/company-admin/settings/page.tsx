@@ -6,15 +6,18 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { KeyRound, Mail, User, ShieldCheck, Loader2, Camera, CheckCircle2, AlertCircle } from "lucide-react";
+import { KeyRound, Mail, User, ShieldCheck, Loader2, Camera, CheckCircle2, AlertCircle, Users, Briefcase, Car } from "lucide-react";
 
 export default function SettingsPage() {
   const [userEmail, setUserEmail] = useState("");
   const [userName, setUserName] = useState("");
   const [companyId, setCompanyId] = useState("");
   
-  // Rule States
+  // Dynamic Rule States
   const [requirePhoto, setRequirePhoto] = useState(false);
+  const [askHost, setAskHost] = useState(false);
+  const [askPurpose, setAskPurpose] = useState(false);
+  const [askVehicle, setAskVehicle] = useState(false);
   
   const [updatingRules, setUpdatingRules] = useState(false);
   const [newPassword, setNewPassword] = useState("");
@@ -41,12 +44,15 @@ export default function SettingsPage() {
           // Fetch the company's specific rules
           const { data: company } = await supabase
             .from("companies")
-            .select("require_photo")
+            .select("require_photo, ask_host, ask_purpose, ask_vehicle")
             .eq("id", profile.company_id)
             .single();
             
           if (company) {
             setRequirePhoto(company.require_photo || false);
+            setAskHost(company.ask_host || false);
+            setAskPurpose(company.ask_purpose || false);
+            setAskVehicle(company.ask_vehicle || false);
           }
         }
       }
@@ -54,17 +60,17 @@ export default function SettingsPage() {
     fetchProfile();
   }, []);
 
-  // --- AUTO-SAVE HANDLER FOR NATIVE CSS TOGGLE ---
-  const handleTogglePhoto = async (checked: boolean) => {
-    setRequirePhoto(checked);
+  // --- REUSABLE AUTO-SAVE HANDLER ---
+  const handleToggleRule = async (field: string, checked: boolean, setter: (val: boolean) => void) => {
+    setter(checked);
     setUpdatingRules(true);
     setMessage(null);
 
-    const { error } = await supabase.from("companies").update({ require_photo: checked }).eq("id", companyId);
+    const { error } = await supabase.from("companies").update({ [field]: checked }).eq("id", companyId);
 
     if (error) {
-      setMessage({ type: "error", text: "Failed to update photo requirement." });
-      setRequirePhoto(!checked); // Revert UI if it failed
+      setMessage({ type: "error", text: `Failed to update the rule.` });
+      setter(!checked); // Revert UI if it failed
     } else {
       setMessage({ type: "success", text: "Settings auto-saved successfully!" });
       setTimeout(() => setMessage(null), 3000);
@@ -150,25 +156,75 @@ export default function SettingsPage() {
                 </CardTitle>
                 <CardDescription className="text-xs">Changes apply instantly to the Guard Dashboard.</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="space-y-3">
                 
-                {/* Sleek Auto-Save Toggle */}
-                <div className="flex items-center justify-between p-4 bg-zinc-50 rounded-xl border border-zinc-200 transition-colors shadow-sm hover:shadow-md">
+                {/* Ask Host Toggle */}
+                <div className="flex items-center justify-between p-3 bg-zinc-50 rounded-xl border border-zinc-200 transition-colors shadow-sm hover:shadow-md">
                   <div className="space-y-1 pr-4">
-                    <Label className="text-sm font-bold flex items-center gap-2 cursor-pointer text-zinc-900" htmlFor="photo-toggle">
-                      <Camera className="w-4 h-4 text-zinc-500"/> Require Photo
+                    <Label className="text-sm font-bold flex items-center gap-2 cursor-pointer text-zinc-900" htmlFor="host-toggle">
+                      <Users className="w-4 h-4 text-zinc-500"/> Host Name
                     </Label>
-                    <p className="text-xs text-zinc-500 leading-snug">Guards must capture a visitor selfie during check-in.</p>
+                    <p className="text-xs text-zinc-500 leading-snug">Ask visitors who they are here to see.</p>
                   </div>
                   
                   <label className="relative inline-flex items-center cursor-pointer shrink-0">
                     <input 
-                      id="photo-toggle"
-                      type="checkbox" 
-                      className="sr-only peer" 
-                      checked={requirePhoto}
-                      onChange={(e) => handleTogglePhoto(e.target.checked)}
-                      disabled={updatingRules}
+                      id="host-toggle" type="checkbox" className="sr-only peer" 
+                      checked={askHost} onChange={(e) => handleToggleRule("ask_host", e.target.checked, setAskHost)} disabled={updatingRules}
+                    />
+                    <div className="w-11 h-6 bg-zinc-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-zinc-200 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                  </label>
+                </div>
+
+                {/* Ask Purpose Toggle */}
+                <div className="flex items-center justify-between p-3 bg-zinc-50 rounded-xl border border-zinc-200 transition-colors shadow-sm hover:shadow-md">
+                  <div className="space-y-1 pr-4">
+                    <Label className="text-sm font-bold flex items-center gap-2 cursor-pointer text-zinc-900" htmlFor="purpose-toggle">
+                      <Briefcase className="w-4 h-4 text-zinc-500"/> Purpose of Visit
+                    </Label>
+                    <p className="text-xs text-zinc-500 leading-snug">Log the reason for the visitor's entry.</p>
+                  </div>
+                  
+                  <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                    <input 
+                      id="purpose-toggle" type="checkbox" className="sr-only peer" 
+                      checked={askPurpose} onChange={(e) => handleToggleRule("ask_purpose", e.target.checked, setAskPurpose)} disabled={updatingRules}
+                    />
+                    <div className="w-11 h-6 bg-zinc-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-zinc-200 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                  </label>
+                </div>
+
+                {/* Ask Vehicle Toggle */}
+                <div className="flex items-center justify-between p-3 bg-zinc-50 rounded-xl border border-zinc-200 transition-colors shadow-sm hover:shadow-md">
+                  <div className="space-y-1 pr-4">
+                    <Label className="text-sm font-bold flex items-center gap-2 cursor-pointer text-zinc-900" htmlFor="vehicle-toggle">
+                      <Car className="w-4 h-4 text-zinc-500"/> Vehicle Reg
+                    </Label>
+                    <p className="text-xs text-zinc-500 leading-snug">Log the license plate if driving.</p>
+                  </div>
+                  
+                  <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                    <input 
+                      id="vehicle-toggle" type="checkbox" className="sr-only peer" 
+                      checked={askVehicle} onChange={(e) => handleToggleRule("ask_vehicle", e.target.checked, setAskVehicle)} disabled={updatingRules}
+                    />
+                    <div className="w-11 h-6 bg-zinc-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-zinc-200 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                  </label>
+                </div>
+
+                {/* Require Photo Toggle */}
+                <div className="flex items-center justify-between p-3 bg-zinc-50 rounded-xl border border-zinc-200 transition-colors shadow-sm hover:shadow-md">
+                  <div className="space-y-1 pr-4">
+                    <Label className="text-sm font-bold flex items-center gap-2 cursor-pointer text-zinc-900" htmlFor="photo-toggle">
+                      <Camera className="w-4 h-4 text-zinc-500"/> Require Photo
+                    </Label>
+                    <p className="text-xs text-zinc-500 leading-snug">Guards must capture a selfie.</p>
+                  </div>
+                  
+                  <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                    <input 
+                      id="photo-toggle" type="checkbox" className="sr-only peer" 
+                      checked={requirePhoto} onChange={(e) => handleToggleRule("require_photo", e.target.checked, setRequirePhoto)} disabled={updatingRules}
                     />
                     <div className="w-11 h-6 bg-zinc-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-100 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-zinc-200 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                   </label>

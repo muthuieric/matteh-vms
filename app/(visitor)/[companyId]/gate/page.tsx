@@ -2,68 +2,101 @@
 
 import { useEffect, useState, useRef } from "react";
 import { useParams } from "next/navigation";
+import Image from "next/image";
 import { supabase } from "@/lib/supabase";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
-import { CheckCircle2, ShieldAlert, ScanLine, Loader2, Camera, UserCircle } from "lucide-react";
+import { Camera, Loader2, UserCircle, CheckCircle2, AlertOctagon, ScanLine } from "lucide-react";
+import PhoneInput from "react-phone-input-2";
+import "react-phone-input-2/lib/style.css";
 
-export default function GateCheckIn() {
+export default function PublicGateCheckIn() {
   const params = useParams();
   const companyId = params.companyId as string;
 
-  const [companyName, setCompanyName] = useState<string>("Loading...");
-  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [companyName, setCompanyName] = useState("");
+  const [accessDenied, setAccessDenied] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
 
-  // --- BUILDING RULE STATE ---
-  const [requirePhoto, setRequirePhoto] = useState(false);
-
-  const [formData, setFormData] = useState({
-    name: "",
-    phone: "",
-    documentType: "National ID",
-    idNumber: "",
+  // Company Rules State
+  const [rules, setRules] = useState({
+    requirePhoto: false,
+    askPhone: true,
+    askId: true,
+    askHost: false,
+    askPurpose: false,
+    askVehicle: false
   });
 
-  const [isScanningId, setIsScanningId] = useState(false);
-  const idInputRef = useRef<HTMLInputElement>(null);
-  
+  // Form State
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [newVisitor, setNewVisitor] = useState({ 
+    name: "", phone: "", id_number: "", doc_type: "National ID", host_name: "", purpose: "", vehicle_reg: "" 
+  });
+
+  // Photo & OCR State
   const [selfieFile, setSelfieFile] = useState<File | null>(null);
   const [selfiePreview, setSelfiePreview] = useState<string | null>(null);
   const selfieInputRef = useRef<HTMLInputElement>(null);
-
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [success, setSuccess] = useState(false);
+  
+  const [isScanning, setIsScanning] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const fetchCompany = async () => {
-      const { data } = await supabase
+    const fetchCompanyData = async () => {
+      if (!companyId) return;
+
+      const { data: company, error } = await supabase
         .from("companies")
-        .select("name, logo_url, require_photo")
+        .select("name, is_locked, subscription_ends_at, require_photo, ask_phone, ask_id, ask_host, ask_purpose, ask_vehicle")
         .eq("id", companyId)
         .single();
 
-      if (data) {
-        setCompanyName(data.name);
-        setLogoUrl(data.logo_url);
-        setRequirePhoto(data.require_photo || false);
+      if (error || !company) {
+        setAccessDenied(true);
+        setLoading(false);
+        return;
       }
+
+      // Check if building subscription is active
+      const isExpired = company.subscription_ends_at ? new Date(company.subscription_ends_at) < new Date() : false;
+      if (company.is_locked || isExpired) {
+        setAccessDenied(true);
+        setLoading(false);
+        return;
+      }
+
+      setCompanyName(company.name);
+      setRules({
+        requirePhoto: company.require_photo || false,
+        askPhone: company.ask_phone !== false,
+        askId: company.ask_id !== false,
+        askHost: company.ask_host || false,
+        askPurpose: company.ask_purpose || false,
+        askVehicle: company.ask_vehicle || false
+      });
+
+      setLoading(false);
     };
-    if (companyId) fetchCompany();
+
+    fetchCompanyData();
   }, [companyId]);
 
-  const handleIdScan = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // --- OCR SCANNING LOGIC ---
+  const handleImageCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setIsScanningId(true);
+    setIsScanning(true);
+
     try {
       const reader = new FileReader();
       reader.readAsDataURL(file);
       reader.onloadend = async () => {
         const base64data = reader.result;
-        
         const response = await fetch("/api/ocr", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -73,37 +106,29 @@ export default function GateCheckIn() {
         const result = await response.json();
 
         if (result.success && result.data) {
-          setFormData(prev => ({
+          setNewVisitor((prev) => ({
             ...prev,
             name: result.data.FullName || prev.name,
-            idNumber: result.data.IDNumber || prev.idNumber,
+            id_number: result.data.IDNumber || prev.id_number,
           }));
         } else {
-          alert("Could not read the ID clearly. Please type your details manually.");
+          alert("Could not read the ID clearly. Please type it manually.");
         }
-        setIsScanningId(false);
+        setIsScanning(false);
       };
     } catch (error) {
       console.error(error);
-      setIsScanningId(false);
-      alert("Error scanning ID. Please enter your details manually.");
+      setIsScanning(false);
+      alert("Error scanning ID. Please try manually.");
     }
   };
 
-  const handleSelfieCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setSelfieFile(file);
-      setSelfiePreview(URL.createObjectURL(file));
-    }
-  };
-
+  // --- ADD VISITOR LOGIC ---
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Strict Check: Did the Admin require a photo, but the visitor skipped it?
-    if (requirePhoto && !selfieFile) {
-      alert("A security photo (selfie) is required by this building's management.");
+    if (rules.requirePhoto && !selfieFile) {
+      alert("A security photo is required by building management.");
       return;
     }
 
@@ -111,6 +136,7 @@ export default function GateCheckIn() {
     let uploadedPhotoUrl = null;
 
     try {
+      // 1. Upload Selfie to Cloudflare R2 if present
       if (selfieFile) {
         const formDataPayload = new FormData();
         formDataPayload.append("file", selfieFile);
@@ -125,139 +151,227 @@ export default function GateCheckIn() {
         if (uploadData.success) {
           uploadedPhotoUrl = uploadData.url;
         } else {
-          console.error("Cloudflare upload failed:", uploadData.error);
           throw new Error("Failed to securely upload security photo.");
         }
       }
 
-      // Name, Phone, and ID are mandatory for all visitors again.
+      // Format the phone number (react-phone-input-2 provides digits only, we add the '+')
+      let finalPhone = null;
+      if (rules.askPhone && newVisitor.phone) {
+        finalPhone = newVisitor.phone.startsWith('+') ? newVisitor.phone : `+${newVisitor.phone}`;
+      }
+
+      // 2. Insert Visitor Record
       const { error } = await supabase.from("visitors").insert([
         {
           company_id: companyId,
-          name: formData.name,
-          phone: formData.phone,
-          document_type: formData.documentType,
-          id_number: formData.idNumber,
+          name: newVisitor.name,
+          phone: finalPhone,
+          document_type: rules.askId ? newVisitor.doc_type : null,
+          id_number: rules.askId ? newVisitor.id_number : null,
+          host_name: rules.askHost ? newVisitor.host_name : null,
+          purpose: rules.askPurpose ? newVisitor.purpose : null,
+          vehicle_reg: rules.askVehicle ? newVisitor.vehicle_reg : null,
           status: "pending",
           photo_url: uploadedPhotoUrl
         }
       ]);
 
-      if (!error) {
-        setSuccess(true);
-      } else {
-        throw error;
-      }
+      if (error) throw error;
+
+      setSubmitted(true);
+
     } catch (err: any) {
       console.error(err);
-      alert(err.message || "Failed to register. Please try again.");
+      alert(err.message || "Failed to submit registration.");
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  if (success) {
+  if (loading) {
     return (
       <div className="min-h-screen bg-zinc-50 flex items-center justify-center p-4">
-        <Card className="max-w-md w-full border-t-8 border-t-green-600 shadow-2xl text-center p-8 space-y-4">
-          <div className="mx-auto w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mb-6">
-            <CheckCircle2 className="w-10 h-10 text-green-600" />
-          </div>
-          <CardTitle className="text-3xl font-bold text-zinc-900">Registration Sent</CardTitle>
-          <CardDescription className="text-lg">
-            Please proceed to the security desk and show your physical ID to the guard to complete check-in.
+        <div className="flex flex-col items-center">
+          <Loader2 className="w-10 h-10 animate-spin text-blue-600 mb-4" />
+          <p className="text-zinc-500 font-medium">Loading building rules...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (accessDenied) {
+    return (
+      <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4">
+        <Card className="max-w-md w-full border-red-900 bg-zinc-900 text-zinc-100 shadow-2xl text-center p-6">
+          <AlertOctagon className="w-16 h-16 text-red-500 mx-auto mb-4" />
+          <CardTitle className="text-2xl font-bold text-white mb-2">Check-in Unavailable</CardTitle>
+          <CardDescription className="text-zinc-400 text-base">
+            This building's self-registration system is currently offline or suspended. Please speak directly to the security guard at the gate.
           </CardDescription>
         </Card>
       </div>
     );
   }
 
-  return (
-    <div className="min-h-screen bg-zinc-50 flex flex-col items-center py-12 px-4">
-      
-      <div className="text-center mb-8 space-y-4">
-        {logoUrl ? (
-          <img src={logoUrl} alt={`${companyName} Logo`} className="h-20 mx-auto object-contain drop-shadow-sm" />
-        ) : (
-          <div className="w-16 h-16 bg-blue-600 text-white rounded-xl flex items-center justify-center text-2xl font-bold mx-auto shadow-lg">
-            {companyName.charAt(0)}
-          </div>
-        )}
-        <h1 className="text-2xl font-bold text-zinc-900">{companyName}</h1>
-        <p className="text-zinc-500 font-medium">Visitor Check-in Portal</p>
+  if (submitted) {
+    return (
+      <div className="min-h-screen bg-zinc-50 flex items-center justify-center p-4">
+        <Card className="max-w-md w-full border-zinc-200 shadow-xl text-center p-8 bg-white/90 backdrop-blur-sm">
+          <CheckCircle2 className="w-20 h-20 text-green-500 mx-auto mb-6" />
+          <CardTitle className="text-2xl font-black text-zinc-900 tracking-tight mb-2">Registration Sent!</CardTitle>
+          <p className="text-zinc-500 font-medium leading-relaxed">
+            Your details have been securely transmitted. <strong className="text-zinc-900">Please wait for the security guard to approve your entry.</strong>
+          </p>
+        </Card>
       </div>
+    );
+  }
 
-      <Card className="w-full max-w-md shadow-xl border-t-4 border-t-blue-600">
-        <CardContent className="pt-6">
+  return (
+    <div className="min-h-screen bg-zinc-50 p-4 py-8 flex items-center justify-center relative overflow-hidden">
+      
+      {/* Ambient Background Elements */}
+      <div className="absolute top-[-10%] left-[-10%] h-[300px] w-[300px] rounded-full bg-blue-400/20 blur-[100px] pointer-events-none" />
+      <div className="absolute bottom-[-10%] right-[-10%] h-[300px] w-[300px] rounded-full bg-amber-400/20 blur-[100px] pointer-events-none" />
+      
+      <Card className="w-full max-w-md shadow-2xl relative border-t-4 border-t-blue-600 bg-white/95 backdrop-blur-sm z-10">
+        <CardHeader className="text-center pb-6">
+          <CardDescription className="uppercase tracking-widest font-bold text-xs text-blue-600 mb-1">Welcome To</CardDescription>
+          <CardTitle className="text-2xl font-black text-zinc-900 tracking-tight">{companyName}</CardTitle>
+          <p className="text-sm text-zinc-500 mt-2">Please fill out this form to register your visit.</p>
+        </CardHeader>
+        
+        <CardContent>
+          {/* HIDDEN FILE INPUT FOR ID CARD */}
+          <input 
+            type="file" accept="image/*" capture="environment" 
+            className="hidden" ref={fileInputRef} onChange={handleImageCapture} 
+          />
           
-          <div className="mb-6">
-            <input 
-              type="file" accept="image/*" capture="environment" 
-              className="hidden" ref={idInputRef} onChange={handleIdScan} 
-            />
-            <Button 
-              type="button"
-              variant="outline" 
-              className="w-full border-dashed border-2 py-6 text-blue-600 border-blue-200 bg-blue-50 hover:bg-blue-100 transition-colors"
-              onClick={() => idInputRef.current?.click()}
-              disabled={isScanningId}
-            >
-              {isScanningId ? (
-                <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Scanning ID Card...</>
-              ) : (
-                <><ScanLine className="mr-2 h-5 w-5" /> Auto-Fill using ID Card</>
-              )}
-            </Button>
-          </div>
+          <Button 
+            variant="outline" 
+            type="button"
+            className="w-full mb-6 border-dashed border-2 py-8 text-blue-600 border-blue-200 bg-blue-50 hover:bg-blue-100 shadow-sm"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isScanning}
+          >
+            {isScanning ? (
+              <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Analyzing ID Card...</>
+            ) : (
+              <><ScanLine className="mr-2 h-5 w-5" /> Auto-Fill using ID Card</>
+            )}
+          </Button>
 
           <div className="relative mb-6">
-            <div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div>
-            <div className="relative flex justify-center text-xs uppercase"><span className="bg-white px-2 text-zinc-500">Or enter manually</span></div>
+            <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-zinc-200" /></div>
+            <div className="relative flex justify-center text-xs uppercase font-bold tracking-wider"><span className="bg-white px-2 text-zinc-400">Or enter manually</span></div>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div className="space-y-2">
-              <Label>Full Name</Label>
-              <Input required placeholder="Enter your official name" value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} />
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <Label className="mb-1 block font-semibold text-zinc-700">Full Name <span className="text-red-500">*</span></Label>
+              <Input required value={newVisitor.name} onChange={(e) => setNewVisitor({...newVisitor, name: e.target.value})} placeholder="e.g. John Doe" className="h-12 bg-zinc-50" />
             </div>
 
-            <div className="space-y-2">
-              <Label>Phone Number</Label>
-              <Input required type="tel" placeholder="e.g. 0712345678" value={formData.phone} onChange={(e) => setFormData({...formData, phone: e.target.value})} />
-            </div>
-
-            <div className="space-y-5">
-              <div className="space-y-2">
-                <Label>Document Type</Label>
-                <select
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
-                  value={formData.documentType}
-                  onChange={(e) => setFormData({...formData, documentType: e.target.value})}
-                >
-                  <option value="National ID">National ID</option>
-                  <option value="Passport">Passport</option>
-                  <option value="Driver's License">Driver's License</option>
-                </select>
+            {/* DYNAMIC FIELD: PHONE WITH REACT-PHONE-INPUT-2 */}
+            {rules.askPhone && (
+              <div>
+                <Label className="mb-1 block font-semibold text-zinc-700">Phone Number <span className="text-red-500">*</span></Label>
+                <PhoneInput 
+                  country="ke" 
+                  value={newVisitor.phone} 
+                  onChange={phone => setNewVisitor({ ...newVisitor, phone })} 
+                  inputClass="!w-full !h-12 !text-zinc-900 !bg-zinc-50 !rounded-md !border !border-zinc-300 focus:!ring-2 focus:!ring-blue-600 px-3" 
+                  containerClass="w-full" 
+                  buttonClass="!border-zinc-300 !bg-zinc-50 !rounded-l-md hover:!bg-zinc-100"
+                />
               </div>
+            )}
 
-              <div className="space-y-2">
-                <Label>Document Number</Label>
-                <Input required placeholder="Enter ID/Passport Number" value={formData.idNumber} onChange={(e) => setFormData({...formData, idNumber: e.target.value})} />
+            {/* DYNAMIC FIELDS: ID DOCUMENTS (SIDE-BY-SIDE GRID) */}
+            {rules.askId && (
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label className="mb-1 block font-semibold text-zinc-700">Document Type</Label>
+                  <select
+                    className="flex h-12 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
+                    value={newVisitor.doc_type}
+                    onChange={(e) => setNewVisitor({...newVisitor, doc_type: e.target.value})}
+                  >
+                    <option value="National ID">National ID</option>
+                    <option value="Passport">Passport</option>
+                    <option value="Driver's License">Driver's License</option>
+                  </select>
+                </div>
+                <div>
+                  <Label className="mb-1 block font-semibold text-zinc-700">ID Number</Label>
+                  <Input 
+                    value={newVisitor.id_number} 
+                    onChange={(e) => setNewVisitor({...newVisitor, id_number: e.target.value})} 
+                    placeholder="If applicable" 
+                    className="h-12 bg-zinc-50"
+                  />
+                </div>
               </div>
-            </div>
+            )}
 
-            {/* DYNAMIC FIELD: SECURITY SELFIE - ONLY COMES UP IF ADMIN TOGGLES IT */}
-            {requirePhoto && (
-              <div className="space-y-3 pt-2 animate-in fade-in slide-in-from-top-2">
-                <Label className="flex justify-between items-center">
-                  Security Photo (Selfie)
-                  <span className="text-xs text-red-500 font-semibold">* Required</span>
+            {/* NEW DYNAMIC FIELDS: HOST, PURPOSE, VEHICLE */}
+            {rules.askHost && (
+              <div>
+                <Label className="mb-1 block font-semibold text-zinc-700">Who are you visiting?</Label>
+                <Input 
+                  value={newVisitor.host_name} 
+                  onChange={(e) => setNewVisitor({...newVisitor, host_name: e.target.value})} 
+                  placeholder="Host's name or department" 
+                  className="h-12 bg-zinc-50"
+                />
+              </div>
+            )}
+
+            {rules.askPurpose && (
+              <div>
+                <Label className="mb-1 block font-semibold text-zinc-700">Purpose of Visit</Label>
+                <Input 
+                  value={newVisitor.purpose} 
+                  onChange={(e) => setNewVisitor({...newVisitor, purpose: e.target.value})} 
+                  placeholder="e.g. Meeting, Delivery, Interview" 
+                  className="h-12 bg-zinc-50"
+                />
+              </div>
+            )}
+
+            {rules.askVehicle && (
+              <div>
+                <Label className="mb-1 block font-semibold text-zinc-700">Vehicle Registration</Label>
+                <Input 
+                  value={newVisitor.vehicle_reg} 
+                  onChange={(e) => setNewVisitor({...newVisitor, vehicle_reg: e.target.value})} 
+                  placeholder="e.g. KCA 123A (Leave blank if walk-in)" 
+                  className="h-12 bg-zinc-50 uppercase"
+                />
+              </div>
+            )}
+
+            {/* SECURITY PHOTO - ONLY VISIBLE IF ADMIN TOGGLED IT ON */}
+            {rules.requirePhoto && (
+              <div className="space-y-3 pt-2 pb-2">
+                <Label className="flex justify-between items-center font-semibold text-zinc-700">
+                  Security Photo
+                  <span className="text-xs text-red-500 font-bold uppercase tracking-wider">* Required</span>
                 </Label>
                 
-                <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 rounded-full bg-zinc-100 border-2 border-dashed border-zinc-300 flex items-center justify-center overflow-hidden shrink-0">
+                <div className="flex items-center gap-4 bg-zinc-50 p-3 rounded-xl border border-zinc-200">
+                  <div className="w-16 h-16 rounded-full bg-white border-2 border-dashed border-zinc-300 flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
                     {selfiePreview ? (
-                      <img src={selfiePreview} alt="Selfie preview" className="w-full h-full object-cover" />
+                      <Image 
+                        src={selfiePreview} 
+                        alt="Selfie preview" 
+                        width={64}
+                        height={64}
+                        className="w-full h-full object-cover" 
+                        unoptimized
+                      />
                     ) : (
                       <UserCircle className="w-8 h-8 text-zinc-300" />
                     )}
@@ -266,33 +380,31 @@ export default function GateCheckIn() {
                   <div className="flex-1">
                     <input 
                       type="file" accept="image/*" capture="user" 
-                      className="hidden" ref={selfieInputRef} onChange={handleSelfieCapture} 
+                      className="hidden" ref={selfieInputRef} onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          setSelfieFile(file);
+                          setSelfiePreview(URL.createObjectURL(file));
+                        }
+                      }} 
                     />
                     <Button 
-                      type="button" variant="secondary" className="w-full text-xs bg-zinc-100 hover:bg-zinc-200"
+                      type="button" variant="outline" className="w-full text-xs h-10 bg-white hover:bg-zinc-100 shadow-sm border-zinc-300 text-zinc-700 font-bold"
                       onClick={() => selfieInputRef.current?.click()}
                     >
-                      <Camera className="w-4 h-4 mr-2" /> Take Photo
+                      <Camera className="w-4 h-4 mr-2" /> Take Selfie
                     </Button>
                   </div>
                 </div>
               </div>
             )}
 
-            <div className="pt-4">
-              <Button type="submit" className="w-full h-12 text-lg bg-blue-600 hover:bg-blue-700" disabled={isSubmitting}>
-                {isSubmitting ? "Sending to Security..." : "Submit Registration"}
-              </Button>
-            </div>
-            
-            <p className="text-xs text-zinc-500 text-center mt-4 px-2 leading-relaxed">
-              By submitting, I consent to my details {requirePhoto ? "and image " : ""}being securely stored for <strong>7 days</strong> for building security purposes, after which they are permanently deleted in compliance with data privacy laws.
-            </p>
+            <Button type="submit" className="w-full mt-6 h-14 text-lg font-bold bg-blue-600 hover:bg-blue-700 shadow-lg transition-transform active:scale-[0.98]" disabled={isSubmitting}>
+              {isSubmitting ? <><Loader2 className="mr-2 h-5 w-5 animate-spin"/> Processing...</> : "Submit Registration"}
+            </Button>
           </form>
         </CardContent>
       </Card>
-      
-      <p className="mt-8 text-xs text-zinc-400">Powered by VMS Global Secure Entry</p>
     </div>
   );
 }
