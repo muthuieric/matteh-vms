@@ -1,523 +1,410 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
+import { useParams } from "next/navigation";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { X, UserCircle, LogOut, Search, Clock, CheckCircle2, UserPlus, Info } from "lucide-react";
+import { Label } from "@/components/ui/label";
+import { Camera, Loader2, UserCircle, CheckCircle2, AlertOctagon, ScanLine } from "lucide-react";
+import PhoneInput from "react-phone-input-2";
+import "react-phone-input-2/lib/style.css";
 
-// Import the modal component for manual registration
-import AddVisitorModal from "@/components/AddVisitorModal";
+export default function PublicGateCheckIn() {
+  const params = useParams();
+  const companyId = params.companyId as string;
 
-type Visitor = {
-  id: string;
-  name: string;
-  phone: string;
-  status: "pending" | "checked_in" | "checked_out" | "auto_checked_out";
-  created_at: string;
-  checked_in_at?: string;
-  document_type: string;
-  id_number?: string;
-  otp_code?: string;
-  company_id: string;
-  photo_url?: string;
-  host_name?: string;
-  purpose?: string;
-  vehicle_reg?: string;
-};
-
-export default function GuardDashboard() {
-  const router = useRouter();
-  const [visitors, setVisitors] = useState<Visitor[]>([]);
   const [loading, setLoading] = useState(true);
-  
-  // State to securely hold the logged-in guard's assigned building/company
-  const [companyId, setCompanyId] = useState<string | null>(null);
-  
-  // Search and Filter State
-  const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "checked_in">("all");
+  const [companyName, setCompanyName] = useState("");
+  const [accessDenied, setAccessDenied] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
 
-  // Dynamic Form Rules (Fetched from Admin Settings)
-  const [requirePhoto, setRequirePhoto] = useState<boolean>(false);
-  const [askPhone, setAskPhone] = useState<boolean>(true);
-  const [askId, setAskId] = useState<boolean>(true);
-  const [askHost, setAskHost] = useState<boolean>(false);
-  const [askPurpose, setAskPurpose] = useState<boolean>(false);
-  const [askVehicle, setAskVehicle] = useState<boolean>(false);
+  // Company Rules State
+  const [rules, setRules] = useState({
+    requirePhoto: false,
+    askPhone: true,
+    askId: true,
+    askHost: false,
+    askPurpose: false,
+    askVehicle: false
+  });
 
-  // OTP & Request States
-  const [verifyingId, setVerifyingId] = useState<string | null>(null);
-  const [sendingOtpId, setSendingOtpId] = useState<string | null>(null); // Prevents double-clicks
-  const [otpInput, setOtpInput] = useState("");
+  // Form State
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [newVisitor, setNewVisitor] = useState({ 
+    name: "", phone: "", id_number: "", doc_type: "National ID", host_name: "", purpose: "", vehicle_reg: "" 
+  });
 
-  // Modals State
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [enlargedPhoto, setEnlargedPhoto] = useState<string | null>(null);
-  const [infoModalVisitor, setInfoModalVisitor] = useState<Visitor | null>(null);
+  // Photo & OCR State
+  const [selfieFile, setSelfieFile] = useState<File | null>(null);
+  const [selfiePreview, setSelfiePreview] = useState<string | null>(null);
+  const selfieInputRef = useRef<HTMLInputElement>(null);
   
+  const [isScanning, setIsScanning] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
-    const initializeDashboard = async () => {
-      // 1. Get the currently logged-in guard's authentication session
-      const { data: authData, error: authError } = await supabase.auth.getUser();
-      
-      if (authError || !authData.user) {
-        console.error("Authentication error:", authError);
-        setLoading(false);
-        return;
-      }
+    const fetchCompanyData = async () => {
+      if (!companyId) return;
 
-      // 2. Look up their assigned company_id in the profiles table
-      const { data: profileData, error: profileError } = await supabase
-        .from("profiles")
-        .select("company_id")
-        .eq("id", authData.user.id)
-        .single();
-
-      if (profileError || !profileData?.company_id) {
-        console.error("Could not load guard profile:", profileError);
-        setLoading(false);
-        return;
-      }
-
-      const currentCompanyId = profileData.company_id;
-      setCompanyId(currentCompanyId);
-
-      // 3. Fetch company rules (Photo, Phone, ID, Host, Purpose, Vehicle toggles)
-      const { data: companyData } = await supabase
+      const { data: company, error } = await supabase
         .from("companies")
-        .select("require_photo, ask_phone, ask_id, ask_host, ask_purpose, ask_vehicle")
-        .eq("id", currentCompanyId)
+        .select("name, is_locked, subscription_ends_at, require_photo, ask_phone, ask_id, ask_host, ask_purpose, ask_vehicle")
+        .eq("id", companyId)
         .single();
-        
-      if (companyData) {
-        setRequirePhoto(companyData.require_photo || false);
-        setAskPhone(companyData.ask_phone !== false);
-        setAskId(companyData.ask_id !== false);
-        setAskHost(companyData.ask_host || false);
-        setAskPurpose(companyData.ask_purpose || false);
-        setAskVehicle(companyData.ask_vehicle || false);
+
+      if (error || !company) {
+        setAccessDenied(true);
+        setLoading(false);
+        return;
       }
 
-      // 4. Fetch ONLY the visitors for this specific guard's building
-      const startOfToday = new Date();
-      startOfToday.setHours(0, 0, 0, 0);
-
-      const { data: visitorData, error: visitorError } = await supabase
-        .from("visitors")
-        .select("*")
-        .eq("company_id", currentCompanyId) 
-        .gte("created_at", startOfToday.toISOString())
-        .in("status", ["pending", "checked_in"])
-        .order("created_at", { ascending: false });
-
-      if (!visitorError) {
-        setVisitors(visitorData || []);
+      // Check if building subscription is active
+      const isExpired = company.subscription_ends_at ? new Date(company.subscription_ends_at) < new Date() : false;
+      if (company.is_locked || isExpired) {
+        setAccessDenied(true);
+        setLoading(false);
+        return;
       }
+
+      setCompanyName(company.name);
+      setRules({
+        requirePhoto: company.require_photo || false,
+        askPhone: company.ask_phone !== false,
+        askId: company.ask_id !== false,
+        askHost: company.ask_host || false,
+        askPurpose: company.ask_purpose || false,
+        askVehicle: company.ask_vehicle || false
+      });
+
       setLoading(false);
     };
 
-    initializeDashboard();
+    fetchCompanyData();
+  }, [companyId]);
 
-    // Set up Real-time listener for instant updates
-    const channel = supabase
-      .channel("guard-dashboard")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "visitors" },
-        (payload) => {
-          if (payload.eventType === "INSERT") {
-            setVisitors((prev) => [payload.new as Visitor, ...prev]);
-          } else if (payload.eventType === "UPDATE") {
-            if (payload.new.status === "checked_out" || payload.new.status === "auto_checked_out") {
-              setVisitors((prev) => prev.filter((v) => v.id !== payload.new.id));
-            } else {
-              setVisitors((prev) =>
-                prev.map((v) => (v.id === payload.new.id ? (payload.new as Visitor) : v))
-              );
-            }
-          } else if (payload.eventType === "DELETE") {
-            setVisitors((prev) => prev.filter((v) => v.id !== payload.old.id));
-          }
-        }
-      )
-      .subscribe();
+  // --- OCR SCANNING LOGIC ---
+  const handleImageCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-    return () => { supabase.removeChannel(channel); };
-  }, []);
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    router.push("/login");
-  };
-
-  // --- OTP LOGIC WITH DOUBLE-CLICK PREVENTION ---
-  const handleSendOTP = async (id: string, phone: string) => {
-    if (sendingOtpId === id) return; // Prevent double execution
-    
-    setSendingOtpId(id); // Lock the button
+    setIsScanning(true);
 
     try {
-      let code = "";
-      let isUnique = false;
-      while (!isUnique) {
-        code = Math.floor(1000 + Math.random() * 9000).toString();
-        const { data } = await supabase.from("visitors").select("id").eq("otp_code", code).in("status", ["pending", "checked_in"]);
-        if (!data || data.length === 0) isUnique = true; 
-      }
-      
-      await supabase.from("visitors").update({ otp_code: code }).eq("id", id);
-      setVerifyingId(id);
-      setOtpInput("");
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onloadend = async () => {
+        const base64data = reader.result;
+        const response = await fetch("/api/ocr", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ imageBase64: base64data }),
+        });
 
-      await fetch("/api/sms", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: phone, message: `Your building entry code is: ${code}` }),
-      });
-    } catch (err) {
-      console.error(err);
-      alert(`[SMS API Error] Could not send message. Please try again.`);
-    } finally {
-      setSendingOtpId(null); // Unlock the button
+        const result = await response.json();
+
+        if (result.success && result.data) {
+          setNewVisitor((prev) => ({
+            ...prev,
+            name: result.data.FullName || prev.name,
+            id_number: result.data.IDNumber || prev.id_number,
+          }));
+        } else {
+          alert("Could not read the ID clearly. Please type it manually.");
+        }
+        setIsScanning(false);
+      };
+    } catch (error) {
+      console.error(error);
+      setIsScanning(false);
+      alert("Error scanning ID. Please try manually.");
     }
   };
 
-  const handleConfirmOTP = async (visitor: Visitor) => {
-    const { data } = await supabase.from("visitors").select("otp_code").eq("id", visitor.id).single();
-    if (!data || data.otp_code !== otpInput.trim()) return alert("Incorrect OTP.");
+  // --- ADD VISITOR LOGIC ---
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
     
-    // Exact verification timestamp saved to checked_in_at
-    await supabase.from("visitors").update({ 
-      status: "checked_in",
-      checked_in_at: new Date().toISOString()
-    }).eq("id", visitor.id);
-    
-    setVerifyingId(null);
+    if (rules.requirePhoto && !selfieFile) {
+      alert("A security photo is required by building management.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    let uploadedPhotoUrl = null;
+
+    try {
+      // 1. Upload Selfie to Cloudflare R2 if present
+      if (selfieFile) {
+        const formDataPayload = new FormData();
+        formDataPayload.append("file", selfieFile);
+        formDataPayload.append("companyId", companyId);
+
+        const uploadRes = await fetch("/api/upload", {
+          method: "POST",
+          body: formDataPayload,
+        });
+        
+        const uploadData = await uploadRes.json();
+        if (uploadData.success) {
+          uploadedPhotoUrl = uploadData.url;
+        } else {
+          throw new Error("Failed to securely upload security photo.");
+        }
+      }
+
+      // Format the phone number (react-phone-input-2 provides digits only, we add the '+')
+      let finalPhone = null;
+      if (rules.askPhone && newVisitor.phone) {
+        finalPhone = newVisitor.phone.startsWith('+') ? newVisitor.phone : `+${newVisitor.phone}`;
+      }
+
+      // 2. Insert Visitor Record
+      const { error } = await supabase.from("visitors").insert([
+        {
+          company_id: companyId,
+          name: newVisitor.name,
+          phone: finalPhone,
+          document_type: rules.askId ? newVisitor.doc_type : null,
+          id_number: rules.askId ? newVisitor.id_number : null,
+          host_name: rules.askHost ? newVisitor.host_name : null,
+          purpose: rules.askPurpose ? newVisitor.purpose : null,
+          vehicle_reg: rules.askVehicle ? newVisitor.vehicle_reg : null,
+          status: "pending",
+          photo_url: uploadedPhotoUrl
+        }
+      ]);
+
+      if (error) throw error;
+
+      setSubmitted(true);
+
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || "Failed to submit registration.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleCheckOut = async (id: string) => {
-    await supabase.from("visitors").update({ 
-      status: "checked_out", 
-      checked_out_at: new Date().toISOString() 
-    }).eq("id", id);
-  };
-
-  // --- UI Calculated Variables with Search & Status Filter ---
-  const filteredVisitors = visitors.filter((v) => {
-    const matchesSearch = v.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          v.phone?.includes(searchTerm) ||
-                          v.id_number?.includes(searchTerm) ||
-                          v.vehicle_reg?.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = statusFilter === "all" || v.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
-  
-  const totalToday = visitors.length;
-  const checkedInCount = visitors.filter(v => v.status === "checked_in").length;
-  const pendingCount = visitors.filter(v => v.status === "pending").length;
-
-  if (!companyId && !loading) {
+  if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-50">
-        <p className="text-red-600 font-medium">Error: Could not load guard profile. Are you logged in?</p>
+      <div className="min-h-screen bg-zinc-50 flex items-center justify-center p-4">
+        <div className="flex flex-col items-center">
+          <Loader2 className="w-10 h-10 animate-spin text-blue-600 mb-4" />
+          <p className="text-zinc-500 font-medium">Loading building rules...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (accessDenied) {
+    return (
+      <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4">
+        <Card className="max-w-md w-full border-red-900 bg-zinc-900 text-zinc-100 shadow-2xl text-center p-6">
+          <AlertOctagon className="w-16 h-16 text-red-500 mx-auto mb-4" />
+          <CardTitle className="text-2xl font-bold text-white mb-2">Check-in Unavailable</CardTitle>
+          <CardDescription className="text-zinc-400 text-base">
+            This building's self-registration system is currently offline or suspended. Please speak directly to the security guard at the gate.
+          </CardDescription>
+        </Card>
+      </div>
+    );
+  }
+
+  if (submitted) {
+    return (
+      <div className="min-h-screen bg-zinc-50 flex items-center justify-center p-4">
+        <Card className="max-w-md w-full border-zinc-200 shadow-xl text-center p-8 bg-white/90 backdrop-blur-sm">
+          <CheckCircle2 className="w-20 h-20 text-green-500 mx-auto mb-6" />
+          <CardTitle className="text-2xl font-black text-zinc-900 tracking-tight mb-2">Registration Sent!</CardTitle>
+          <p className="text-zinc-500 font-medium leading-relaxed">
+            Your details have been securely transmitted. <strong className="text-zinc-900">Please wait for the security guard to approve your entry.</strong>
+          </p>
+        </Card>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-zinc-50 p-6 relative overflow-x-hidden">
+    <div className="min-h-screen bg-zinc-50 p-4 py-8 flex items-center justify-center relative overflow-hidden">
       
-      {/* --- ENHANCED BACKGROUND --- */}
-      <div className="fixed inset-0 z-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px] pointer-events-none"></div>
-      <div className="fixed top-[-10%] left-[-10%] h-[500px] w-[500px] rounded-full bg-blue-400/10 blur-[100px] pointer-events-none z-0" />
-      <div className="fixed bottom-[-10%] right-[-10%] h-[500px] w-[500px] rounded-full bg-zinc-400/20 blur-[100px] pointer-events-none z-0" />
-      {/* --------------------------- */}
-
-      <div className="max-w-6xl mx-auto space-y-6 relative z-10">
+      {/* Ambient Background Elements */}
+      <div className="absolute top-[-10%] left-[-10%] h-[300px] w-[300px] rounded-full bg-blue-400/20 blur-[100px] pointer-events-none" />
+      <div className="absolute bottom-[-10%] right-[-10%] h-[300px] w-[300px] rounded-full bg-amber-400/20 blur-[100px] pointer-events-none" />
+      
+      <Card className="w-full max-w-md shadow-2xl relative border-t-4 border-t-blue-600 bg-white/95 backdrop-blur-sm z-10">
+        <CardHeader className="text-center pb-6">
+          <CardDescription className="uppercase tracking-widest font-bold text-xs text-blue-600 mb-1">Welcome To</CardDescription>
+          <CardTitle className="text-2xl font-black text-zinc-900 tracking-tight">{companyName}</CardTitle>
+          <p className="text-sm text-zinc-500 mt-2">Please fill out this form to register your visit.</p>
+        </CardHeader>
         
-        {/* Header Section */}
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <div>
-            <h1 className="text-3xl font-bold text-zinc-900">Gate Dashboard</h1>
-            <p className="text-zinc-500">Live visitor monitoring and verification.</p>
-          </div>
-          <div className="flex items-center gap-3 w-full sm:w-auto">
-            <Button variant="outline" onClick={handleLogout} className="flex-1 sm:flex-initial border-zinc-200 text-zinc-600 hover:bg-red-50 hover:text-red-600 hover:border-red-200 bg-white/80 backdrop-blur-sm">
-              <LogOut className="w-4 h-4 mr-2" /> Sign Out
-            </Button>
-            <Button onClick={() => setShowAddModal(true)} className="flex-1 sm:flex-initial bg-blue-600 hover:bg-blue-700 shadow-md">
-              <UserPlus className="w-4 h-4 mr-2 hidden sm:inline-block" /> + New Visitor
-            </Button>
-          </div>
-        </div>
-
-        {/* Dashboard Stats */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-          <Card className="bg-white/90 backdrop-blur-sm border-zinc-200/60 shadow-sm">
-            <CardContent className="p-6 flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-zinc-500">Total Today</p>
-                <h3 className="text-3xl font-bold text-zinc-900 mt-1">{totalToday}</h3>
-              </div>
-              <div className="p-3 bg-zinc-100/80 text-zinc-600 rounded-full">
-                <UserPlus className="w-6 h-6" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="bg-white/90 backdrop-blur-sm border-zinc-200/60 shadow-sm">
-            <CardContent className="p-6 flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-zinc-500">Pending</p>
-                <h3 className="text-3xl font-bold text-zinc-900 mt-1">{pendingCount}</h3>
-              </div>
-              <div className="p-3 bg-amber-100/80 text-amber-600 rounded-full">
-                <Clock className="w-6 h-6" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="bg-white/90 backdrop-blur-sm border-zinc-200/60 shadow-sm">
-            <CardContent className="p-6 flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-zinc-500">Checked In</p>
-                <h3 className="text-3xl font-bold text-zinc-900 mt-1">{checkedInCount}</h3>
-              </div>
-              <div className="p-3 bg-green-100/80 text-green-600 rounded-full">
-                <CheckCircle2 className="w-6 h-6" />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Live Visitor Table */}
-        <Card className="bg-white/90 backdrop-blur-sm border-zinc-200/60 shadow-sm">
-          <CardHeader className="flex flex-col gap-4 border-b border-zinc-100/50 pb-4">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 w-full">
-              <CardTitle>Today's Active Visitors</CardTitle>
-              
-              <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
-                <div className="relative w-full sm:w-64">
-                  <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-zinc-500" />
-                  <Input 
-                    placeholder="Search..." 
-                    className="pl-9 w-full bg-white/80"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                  />
-                </div>
-                
-                <div className="flex w-full sm:w-auto bg-zinc-100/80 p-1 rounded-md border border-zinc-200/60 overflow-x-auto">
-                  <button
-                    onClick={() => setStatusFilter("all")}
-                    className={`flex-1 sm:flex-none px-4 py-1.5 text-sm font-medium rounded transition-colors whitespace-nowrap ${statusFilter === "all" ? "bg-white shadow-sm text-zinc-900" : "text-zinc-500 hover:text-zinc-900"}`}
-                  >
-                    All
-                  </button>
-                  <button
-                    onClick={() => setStatusFilter("pending")}
-                    className={`flex-1 sm:flex-none px-4 py-1.5 text-sm font-medium rounded transition-colors whitespace-nowrap ${statusFilter === "pending" ? "bg-white shadow-sm text-amber-700" : "text-zinc-500 hover:text-zinc-900"}`}
-                  >
-                    Pending
-                  </button>
-                  <button
-                    onClick={() => setStatusFilter("checked_in")}
-                    className={`flex-1 sm:flex-none px-4 py-1.5 text-sm font-medium rounded transition-colors whitespace-nowrap ${statusFilter === "checked_in" ? "bg-white shadow-sm text-green-700" : "text-zinc-500 hover:text-zinc-900"}`}
-                  >
-                    Checked In
-                  </button>
-                </div>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="pt-6">
-            {loading ? (
-              <p className="text-zinc-500 py-4">Loading secure data...</p>
-            ) : filteredVisitors.length === 0 ? (
-              <p className="text-zinc-500 py-4">No active visitors match your search.</p>
+        <CardContent>
+          {/* HIDDEN FILE INPUT FOR ID CARD */}
+          <input 
+            type="file" accept="image/*" capture="environment" 
+            className="hidden" ref={fileInputRef} onChange={handleImageCapture} 
+          />
+          
+          <Button 
+            variant="outline" 
+            type="button"
+            className="w-full mb-6 border-dashed border-2 py-8 text-blue-600 border-blue-200 bg-blue-50 hover:bg-blue-100 shadow-sm"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isScanning}
+          >
+            {isScanning ? (
+              <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Analyzing ID Card...</>
             ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="border-zinc-200/50">
-                      <TableHead>Arrived</TableHead>
-                      <TableHead>Visitor Details</TableHead>
-                      <TableHead>Phone & ID</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Action</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredVisitors.map((visitor) => (
-                      <TableRow key={visitor.id} className="border-zinc-200/50 hover:bg-zinc-50/50">
-                        {/* Arrival Time */}
-                        <TableCell className="font-medium text-zinc-500">
-                          {new Date(visitor.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                        </TableCell>
-                        
-                        {/* Photo, Name, and Info Button Column */}
-                        <TableCell>
-                          <div className="flex items-center gap-3">
-                            {visitor.photo_url ? (
-                              <Image 
-                                src={visitor.photo_url} 
-                                alt={`${visitor.name}'s photo`} 
-                                width={40}
-                                height={40}
-                                className="w-10 h-10 rounded-full object-cover border-2 border-zinc-200 cursor-pointer hover:opacity-80 transition-opacity bg-white shrink-0"
-                                onClick={() => setEnlargedPhoto(visitor.photo_url!)}
-                                unoptimized
-                              />
-                            ) : (
-                              <div className="w-10 h-10 rounded-full bg-zinc-100 flex items-center justify-center border-2 border-zinc-200 text-zinc-400 shrink-0">
-                                <UserCircle className="w-6 h-6" />
-                              </div>
-                            )}
-                            
-                            <div className="flex items-center gap-2">
-                              <span className="font-semibold whitespace-nowrap">{visitor.name}</span>
-                              
-                              {/* VIEW DETAILS BUTTON - ONLY SHOWS IF EXTRA DATA EXISTS */}
-                              {(visitor.host_name || visitor.purpose || visitor.vehicle_reg) && (
-                                <button
-                                  onClick={() => setInfoModalVisitor(visitor)}
-                                  className="text-blue-600 bg-blue-50 hover:bg-blue-100 p-1.5 rounded-full transition-colors shrink-0 shadow-sm border border-blue-100"
-                                  title="View Visit Info"
-                                >
-                                  <Info className="w-3.5 h-3.5" />
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        </TableCell>
+              <><ScanLine className="mr-2 h-5 w-5" /> Auto-Fill using ID Card</>
+            )}
+          </Button>
 
-                        <TableCell>
-                          <div className="text-sm">{visitor.phone || "—"}</div>
-                          <div className="text-xs text-zinc-500">{visitor.id_number || "No ID"}</div>
-                        </TableCell>
-                        
-                        <TableCell>
-                          {visitor.status === "pending" ? (
-                            <span className="inline-flex items-center rounded-full bg-amber-100/80 px-2.5 py-0.5 text-xs font-semibold text-amber-800 whitespace-nowrap border border-amber-200/50">Pending</span>
-                          ) : (
-                            <span className="inline-flex items-center rounded-full bg-green-100/80 px-2.5 py-0.5 text-xs font-semibold text-green-800 whitespace-nowrap border border-green-200/50">Checked In</span>
-                          )}
-                        </TableCell>
+          <div className="relative mb-6">
+            <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-zinc-200" /></div>
+            <div className="relative flex justify-center text-xs uppercase font-bold tracking-wider"><span className="bg-white px-2 text-zinc-400">Or enter manually</span></div>
+          </div>
 
-                        <TableCell className="text-right">
-                          {visitor.status === "pending" ? (
-                            verifyingId === visitor.id ? (
-                              <div className="flex items-center justify-end gap-2">
-                                <input 
-                                  type="text" maxLength={4} placeholder="OTP"
-                                  className="w-16 rounded border px-2 py-1 text-center text-sm bg-white"
-                                  value={otpInput} onChange={(e) => setOtpInput(e.target.value)}
-                                />
-                                <Button size="sm" onClick={() => handleConfirmOTP(visitor)}>Confirm</Button>
-                                <Button size="sm" variant="ghost" onClick={() => setVerifyingId(null)}>Cancel</Button>
-                              </div>
-                            ) : (
-                              <Button 
-                                size="sm" 
-                                onClick={() => handleSendOTP(visitor.id, visitor.phone)} 
-                                disabled={sendingOtpId === visitor.id}
-                                className="whitespace-nowrap bg-white hover:bg-zinc-100 text-zinc-900 border border-zinc-200 shadow-sm disabled:opacity-50"
-                              >
-                                {sendingOtpId === visitor.id ? "Sending..." : "Verify & Send OTP"}
-                              </Button>
-                            )
-                          ) : (
-                            <Button size="sm" variant="secondary" onClick={() => handleCheckOut(visitor.id)} className="whitespace-nowrap bg-white/60 hover:bg-zinc-100 text-zinc-700 shadow-sm">Check Out</Button>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <Label className="mb-1 block font-semibold text-zinc-700">Full Name <span className="text-red-500">*</span></Label>
+              <Input required value={newVisitor.name} onChange={(e) => setNewVisitor({...newVisitor, name: e.target.value})} placeholder="e.g. John Doe" className="h-12 bg-zinc-50" />
+            </div>
+
+            {/* DYNAMIC FIELD: PHONE WITH REACT-PHONE-INPUT-2 */}
+            {rules.askPhone && (
+              <div>
+                <Label className="mb-1 block font-semibold text-zinc-700">Phone Number <span className="text-red-500">*</span></Label>
+                <PhoneInput 
+                  country="ke" 
+                  value={newVisitor.phone} 
+                  onChange={phone => setNewVisitor({ ...newVisitor, phone })} 
+                  inputClass="!w-full !h-12 !text-zinc-900 !bg-zinc-50 !rounded-md !border !border-zinc-300 focus:!ring-2 focus:!ring-blue-600 px-3" 
+                  containerClass="w-full" 
+                  buttonClass="!border-zinc-300 !bg-zinc-50 !rounded-l-md hover:!bg-zinc-100"
+                />
               </div>
             )}
-          </CardContent>
-        </Card>
-      </div>
 
-      {/* --- ADD VISITOR MODAL COMPONENT --- */}
-      <AddVisitorModal 
-        isOpen={showAddModal} 
-        onClose={() => setShowAddModal(false)}
-        companyId={companyId}
-        requirePhoto={requirePhoto}
-        askPhone={askPhone}
-        askId={askId}
-        askHost={askHost}
-        askPurpose={askPurpose}
-        askVehicle={askVehicle}
-      />
+            {/* DYNAMIC FIELDS: ID DOCUMENTS (SIDE-BY-SIDE GRID) */}
+            {rules.askId && (
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label className="mb-1 block font-semibold text-zinc-700">Document Type</Label>
+                  <select
+                    className="flex h-12 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
+                    value={newVisitor.doc_type}
+                    onChange={(e) => setNewVisitor({...newVisitor, doc_type: e.target.value})}
+                  >
+                    <option value="National ID">National ID</option>
+                    <option value="Passport">Passport</option>
+                    <option value="Driver's License">Driver's License</option>
+                  </select>
+                </div>
+                <div>
+                  <Label className="mb-1 block font-semibold text-zinc-700">ID Number</Label>
+                  <Input 
+                    value={newVisitor.id_number} 
+                    onChange={(e) => setNewVisitor({...newVisitor, id_number: e.target.value})} 
+                    placeholder="If applicable" 
+                    className="h-12 bg-zinc-50"
+                  />
+                </div>
+              </div>
+            )}
 
-      {/* --- EXTRA VISIT INFO MODAL --- */}
-      {infoModalVisitor && (
-        <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4 backdrop-blur-sm">
-          <Card className="w-full max-w-sm shadow-2xl relative border-0 overflow-hidden bg-white">
-            <div className="absolute top-0 left-0 w-full h-1.5 bg-blue-500"></div>
-            <button onClick={() => setInfoModalVisitor(null)} className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-900 bg-zinc-100 hover:bg-zinc-200 rounded-full p-1.5 transition-colors">
-              <X size={18} />
-            </button>
-            <CardHeader className="pt-8 pb-4 border-b border-zinc-100/50">
-              <CardTitle className="text-xl font-bold">Visit Details</CardTitle>
-              <CardDescription>Extra information provided by {infoModalVisitor.name}.</CardDescription>
-            </CardHeader>
-            <CardContent className="p-6 space-y-5 bg-zinc-50/50">
+            {/* NEW DYNAMIC FIELDS: HOST, PURPOSE, VEHICLE */}
+            {rules.askHost && (
               <div>
-                <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1">Host Name</p>
-                <p className="font-medium text-zinc-900 text-lg leading-snug">{infoModalVisitor.host_name || "—"}</p>
+                <Label className="mb-1 block font-semibold text-zinc-700">Who are you visiting?</Label>
+                <Input 
+                  value={newVisitor.host_name} 
+                  onChange={(e) => setNewVisitor({...newVisitor, host_name: e.target.value})} 
+                  placeholder="Host's name or department" 
+                  className="h-12 bg-zinc-50"
+                />
               </div>
-              <div>
-                <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1">Purpose of Visit</p>
-                <p className="font-medium text-zinc-900 text-lg leading-snug">{infoModalVisitor.purpose || "—"}</p>
-              </div>
-              <div>
-                <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1">Vehicle Registration</p>
-                <p className="font-mono font-medium text-zinc-900 text-lg leading-snug">{infoModalVisitor.vehicle_reg || "—"}</p>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+            )}
 
-      {/* --- ENLARGED PHOTO LIGHTBOX MODAL --- */}
-      {enlargedPhoto && (
-        <div 
-          className="fixed inset-0 bg-black/90 z-[80] flex flex-col items-center justify-center p-4 cursor-pointer backdrop-blur-sm" 
-          onClick={() => setEnlargedPhoto(null)}
-        >
-          <div className="relative max-w-2xl w-full flex flex-col items-center">
-            <button 
-              className="absolute -top-12 right-0 text-white/70 hover:text-white transition-colors p-2"
-              onClick={(e) => { e.stopPropagation(); setEnlargedPhoto(null); }}
-            >
-              <X size={32} />
-            </button>
-            <Image 
-              src={enlargedPhoto} 
-              alt="Enlarged security photo" 
-              width={1000}
-              height={1000}
-              className="w-full h-auto rounded-lg shadow-[0_0_50px_rgba(0,0,0,0.5)] border-4 border-zinc-800 object-contain max-h-[85vh]" 
-              onClick={(e) => e.stopPropagation()} 
-              unoptimized
-            />
-          </div>
-        </div>
-      )}
+            {rules.askPurpose && (
+              <div>
+                <Label className="mb-1 block font-semibold text-zinc-700">Purpose of Visit</Label>
+                <Input 
+                  value={newVisitor.purpose} 
+                  onChange={(e) => setNewVisitor({...newVisitor, purpose: e.target.value})} 
+                  placeholder="e.g. Meeting, Delivery, Interview" 
+                  className="h-12 bg-zinc-50"
+                />
+              </div>
+            )}
+
+            {rules.askVehicle && (
+              <div>
+                <Label className="mb-1 block font-semibold text-zinc-700">Vehicle Registration</Label>
+                <Input 
+                  value={newVisitor.vehicle_reg} 
+                  onChange={(e) => setNewVisitor({...newVisitor, vehicle_reg: e.target.value})} 
+                  placeholder="e.g. KCA 123A (Leave blank if walk-in)" 
+                  className="h-12 bg-zinc-50 uppercase"
+                />
+              </div>
+            )}
+
+            {/* SECURITY PHOTO - ONLY VISIBLE IF ADMIN TOGGLED IT ON */}
+            {rules.requirePhoto && (
+              <div className="space-y-3 pt-2 pb-2">
+                <Label className="flex justify-between items-center font-semibold text-zinc-700">
+                  Security Photo
+                  <span className="text-xs text-red-500 font-bold uppercase tracking-wider">* Required</span>
+                </Label>
+                
+                <div className="flex items-center gap-4 bg-zinc-50 p-3 rounded-xl border border-zinc-200">
+                  <div className="w-16 h-16 rounded-full bg-white border-2 border-dashed border-zinc-300 flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
+                    {selfiePreview ? (
+                      <Image 
+                        src={selfiePreview} 
+                        alt="Selfie preview" 
+                        width={64}
+                        height={64}
+                        className="w-full h-full object-cover" 
+                        unoptimized
+                      />
+                    ) : (
+                      <UserCircle className="w-8 h-8 text-zinc-300" />
+                    )}
+                  </div>
+                  
+                  <div className="flex-1">
+                    <input 
+                      type="file" accept="image/*" capture="user" 
+                      className="hidden" ref={selfieInputRef} onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          setSelfieFile(file);
+                          setSelfiePreview(URL.createObjectURL(file));
+                        }
+                      }} 
+                    />
+                    <Button 
+                      type="button" variant="outline" className="w-full text-xs h-10 bg-white hover:bg-zinc-100 shadow-sm border-zinc-300 text-zinc-700 font-bold"
+                      onClick={() => selfieInputRef.current?.click()}
+                    >
+                      <Camera className="w-4 h-4 mr-2" /> Take Selfie
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <Button type="submit" className="w-full mt-6 h-14 text-lg font-bold bg-blue-600 hover:bg-blue-700 shadow-lg transition-transform active:scale-[0.98]" disabled={isSubmitting}>
+              {isSubmitting ? <><Loader2 className="mr-2 h-5 w-5 animate-spin"/> Processing...</> : "Submit Registration"}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   );
 }

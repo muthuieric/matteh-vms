@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { LayoutDashboard, QrCode, Shield, LogOut, AlertOctagon, CreditCard, Loader2, Settings, Menu, X } from "lucide-react";
+import { LayoutDashboard, QrCode, Shield, LogOut, AlertOctagon, CreditCard, Loader2, Settings, Menu, X, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -61,7 +61,8 @@ export default function CompanyAdminLayout({ children }: { children: React.React
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    router.push("/login");
+    // CHANGED: Force a hard refresh to bypass Next.js cache and ensure session clears
+    window.location.href = "/login";
   };
 
   const handlePayment = async () => {
@@ -154,17 +155,18 @@ export default function CompanyAdminLayout({ children }: { children: React.React
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-50">
+      <div className="flex min-h-screen items-center justify-center bg-transparent">
         <p className="text-zinc-500 font-medium animate-pulse">Verifying secure credentials...</p>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col md:flex-row min-h-screen bg-zinc-50">
+    /* CHANGED: h-screen and overflow-hidden for independent scrolling */
+    <div className="flex flex-col md:flex-row h-screen bg-transparent relative overflow-hidden">
       
       {/* --- MOBILE TOP BAR --- */}
-      <div className="md:hidden flex items-center justify-between bg-white border-b border-zinc-200 p-4 sticky top-0 z-30 shadow-sm">
+      <div className="md:hidden flex items-center justify-between bg-white/90 backdrop-blur-md border-b border-zinc-200/60 p-4 shrink-0 z-30 shadow-sm">
         <div>
           <h2 className="text-lg font-extrabold text-zinc-900 tracking-tight">VMS Portal</h2>
           <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mt-0.5">Admin Dashboard</p>
@@ -186,8 +188,8 @@ export default function CompanyAdminLayout({ children }: { children: React.React
             onClick={() => setIsMobileMenuOpen(false)} 
           />
           {/* Drawer Menu */}
-          <div className="relative w-72 max-w-[80%] bg-white h-full shadow-2xl flex flex-col animate-in slide-in-from-left duration-200">
-            <div className="p-4 border-b border-zinc-200 flex items-center justify-between bg-zinc-50">
+          <div className="relative w-72 max-w-[80%] bg-white/95 backdrop-blur-xl h-full shadow-2xl flex flex-col animate-in slide-in-from-left duration-200">
+            <div className="p-4 border-b border-zinc-200/60 flex items-center justify-between bg-zinc-50/50">
               <h2 className="text-lg font-extrabold text-zinc-900 tracking-tight">Menu</h2>
               <button 
                 onClick={() => setIsMobileMenuOpen(false)}
@@ -201,41 +203,48 @@ export default function CompanyAdminLayout({ children }: { children: React.React
               <Link 
                 href="/dashboard/company-admin" 
                 onClick={() => setIsMobileMenuOpen(false)}
-                className={`flex items-center gap-3 px-3 py-3 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100"}`}
+                className={`flex items-center gap-3 px-3 py-3 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100/50"}`}
               >
                 <LayoutDashboard size={20} /> Overview
               </Link>
               <Link 
                 href="/dashboard/company-admin/qr" 
                 onClick={() => setIsMobileMenuOpen(false)}
-                className={`flex items-center gap-3 px-3 py-3 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/qr" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100"}`}
+                className={`flex items-center gap-3 px-3 py-3 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/qr" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100/50"}`}
               >
                 <QrCode size={20} /> Gate QR Code
               </Link>
               <Link 
                 href="/dashboard/company-admin/guards" 
                 onClick={() => setIsMobileMenuOpen(false)}
-                className={`flex items-center gap-3 px-3 py-3 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/guards" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100"}`}
+                className={`flex items-center gap-3 px-3 py-3 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/guards" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100/50"}`}
               >
                 <Shield size={20} /> Security Team
               </Link>
               <Link 
+                href="/dashboard/company-admin/reports" 
+                onClick={() => setIsMobileMenuOpen(false)}
+                className={`flex items-center gap-3 px-3 py-3 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/reports" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100/50"}`}
+              >
+                <FileText size={20} /> Reports & Logs
+              </Link>
+              <Link 
                 href="/dashboard/company-admin/billing" 
                 onClick={() => setIsMobileMenuOpen(false)}
-                className={`flex items-center gap-3 px-3 py-3 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/billing" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100"}`}
+                className={`flex items-center gap-3 px-3 py-3 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/billing" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100/50"}`}
               >
                 <CreditCard size={20} /> Billing
               </Link>
               <Link 
                 href="/dashboard/company-admin/settings" 
                 onClick={() => setIsMobileMenuOpen(false)}
-                className={`flex items-center gap-3 px-3 py-3 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/settings" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100"}`}
+                className={`flex items-center gap-3 px-3 py-3 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/settings" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100/50"}`}
               >
                 <Settings size={20} /> Settings
               </Link>
             </nav>
 
-            <div className="p-4 border-t border-zinc-200">
+            <div className="p-4 border-t border-zinc-200/60">
               <button 
                 onClick={handleLogout}
                 className="flex items-center gap-3 px-3 py-3 w-full text-zinc-600 rounded-md hover:bg-red-50 hover:text-red-600 transition-colors font-medium text-sm"
@@ -248,8 +257,9 @@ export default function CompanyAdminLayout({ children }: { children: React.React
       )}
 
       {/* --- DESKTOP SIDEBAR --- */}
-      <aside className="w-64 bg-white border-r border-zinc-200 hidden md:flex flex-col shadow-sm z-10 sticky top-0 h-screen">
-        <div className="p-6 border-b border-zinc-200">
+      {/* CHANGED: Removed sticky, added h-full and shrink-0 */}
+      <aside className="w-64 bg-white/80 backdrop-blur-md border-r border-zinc-200/60 hidden md:flex flex-col shadow-sm z-20 h-full shrink-0">
+        <div className="p-6 border-b border-zinc-200/60">
           <h2 className="text-xl font-extrabold text-zinc-900 tracking-tight">VMS Portal</h2>
           <p className="text-xs text-zinc-500 font-medium uppercase tracking-wider mt-1">Admin Dashboard</p>
         </div>
@@ -257,37 +267,43 @@ export default function CompanyAdminLayout({ children }: { children: React.React
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
           <Link 
             href="/dashboard/company-admin" 
-            className={`flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100"}`}
+            className={`flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin" ? "text-blue-700 bg-blue-50/80 shadow-sm" : "text-zinc-600 hover:bg-zinc-100/50"}`}
           >
             <LayoutDashboard size={18} /> Overview
           </Link>
           <Link 
             href="/dashboard/company-admin/qr" 
-            className={`flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/qr" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100"}`}
+            className={`flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/qr" ? "text-blue-700 bg-blue-50/80 shadow-sm" : "text-zinc-600 hover:bg-zinc-100/50"}`}
           >
             <QrCode size={18} /> Gate QR Code
           </Link>
           <Link 
             href="/dashboard/company-admin/guards" 
-            className={`flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/guards" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100"}`}
+            className={`flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/guards" ? "text-blue-700 bg-blue-50/80 shadow-sm" : "text-zinc-600 hover:bg-zinc-100/50"}`}
           >
             <Shield size={18} /> Security Team
           </Link>
           <Link 
+            href="/dashboard/company-admin/reports" 
+            className={`flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/reports" ? "text-blue-700 bg-blue-50/80 shadow-sm" : "text-zinc-600 hover:bg-zinc-100/50"}`}
+          >
+            <FileText size={18} /> Reports & Logs
+          </Link>
+          <Link 
             href="/dashboard/company-admin/billing" 
-            className={`flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/billing" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100"}`}
+            className={`flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/billing" ? "text-blue-700 bg-blue-50/80 shadow-sm" : "text-zinc-600 hover:bg-zinc-100/50"}`}
           >
             <CreditCard size={18} /> Billing
           </Link>
           <Link 
             href="/dashboard/company-admin/settings" 
-            className={`flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/settings" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100"}`}
+            className={`flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/settings" ? "text-blue-700 bg-blue-50/80 shadow-sm" : "text-zinc-600 hover:bg-zinc-100/50"}`}
           >
             <Settings size={18} /> Settings
           </Link>
         </nav>
 
-        <div className="p-4 border-t border-zinc-200">
+        <div className="p-4 border-t border-zinc-200/60">
           <button 
             onClick={handleLogout}
             className="flex items-center gap-3 px-3 py-2.5 w-full text-zinc-600 rounded-md hover:bg-red-50 hover:text-red-600 transition-colors font-medium text-sm"
@@ -298,7 +314,8 @@ export default function CompanyAdminLayout({ children }: { children: React.React
       </aside>
 
       {/* --- MAIN PAGE CONTENT --- */}
-      <main className="flex-1 w-full relative">
+      {/* CHANGED: Added h-full, overflow-y-auto, and padding-bottom */}
+      <main className="flex-1 w-full relative z-10 h-full overflow-y-auto pb-10">
         {children}
       </main>
 

@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/table";
 import { X, UserCircle, LogOut, Search, Clock, CheckCircle2, UserPlus, Info } from "lucide-react";
 
-// Import the new modal component
+// Import the modal component for manual registration
 import AddVisitorModal from "@/components/AddVisitorModal";
 
 type Visitor = {
@@ -26,6 +26,7 @@ type Visitor = {
   phone: string;
   status: "pending" | "checked_in" | "checked_out" | "auto_checked_out";
   created_at: string;
+  checked_in_at?: string;
   document_type: string;
   id_number?: string;
   otp_code?: string;
@@ -48,7 +49,7 @@ export default function GuardDashboard() {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "checked_in">("all");
 
-  // Dynamic Form Rules
+  // Dynamic Form Rules (Fetched from Admin Settings)
   const [requirePhoto, setRequirePhoto] = useState<boolean>(false);
   const [askPhone, setAskPhone] = useState<boolean>(true);
   const [askId, setAskId] = useState<boolean>(true);
@@ -56,8 +57,9 @@ export default function GuardDashboard() {
   const [askPurpose, setAskPurpose] = useState<boolean>(false);
   const [askVehicle, setAskVehicle] = useState<boolean>(false);
 
-  // OTP State
+  // OTP & Request States
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
+  const [sendingOtpId, setSendingOtpId] = useState<string | null>(null); // Prevents double-clicks
   const [otpInput, setOtpInput] = useState("");
 
   // Modals State
@@ -92,7 +94,7 @@ export default function GuardDashboard() {
       const currentCompanyId = profileData.company_id;
       setCompanyId(currentCompanyId);
 
-      // Fetch company rules (Photo, Phone, ID, Host, Purpose, Vehicle toggles)
+      // 3. Fetch company rules (Photo, Phone, ID, Host, Purpose, Vehicle toggles)
       const { data: companyData } = await supabase
         .from("companies")
         .select("require_photo, ask_phone, ask_id, ask_host, ask_purpose, ask_vehicle")
@@ -128,7 +130,7 @@ export default function GuardDashboard() {
 
     initializeDashboard();
 
-    // Set up Real-time listener
+    // Set up Real-time listener for instant updates
     const channel = supabase
       .channel("guard-dashboard")
       .on(
@@ -157,32 +159,39 @@ export default function GuardDashboard() {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    router.push("/login");
+    // CHANGED: Force a hard refresh to bypass Next.js cache and ensure session clears
+    window.location.href = "/login";
   };
 
-  // --- OTP LOGIC ---
+  // --- OTP LOGIC WITH DOUBLE-CLICK PREVENTION ---
   const handleSendOTP = async (id: string, phone: string) => {
-    let code = "";
-    let isUnique = false;
-    while (!isUnique) {
-      code = Math.floor(1000 + Math.random() * 9000).toString();
-      const { data } = await supabase.from("visitors").select("id").eq("otp_code", code).in("status", ["pending", "checked_in"]);
-      if (!data || data.length === 0) isUnique = true; 
-    }
+    if (sendingOtpId === id) return; // Prevent double execution
     
-    await supabase.from("visitors").update({ otp_code: code }).eq("id", id);
-    setVerifyingId(id);
-    setOtpInput("");
+    setSendingOtpId(id); // Lock the button
 
     try {
+      let code = "";
+      let isUnique = false;
+      while (!isUnique) {
+        code = Math.floor(1000 + Math.random() * 9000).toString();
+        const { data } = await supabase.from("visitors").select("id").eq("otp_code", code).in("status", ["pending", "checked_in"]);
+        if (!data || data.length === 0) isUnique = true; 
+      }
+      
+      await supabase.from("visitors").update({ otp_code: code }).eq("id", id);
+      setVerifyingId(id);
+      setOtpInput("");
+
       await fetch("/api/sms", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: phone, message: `Your building exit code is: ${code}` }),
+        body: JSON.stringify({ phone: phone, message: `Your building entry code is: ${code}` }),
       });
     } catch (err) {
       console.error(err);
-      alert(`[SMS TEST] Code: ${code}`);
+      alert(`[SMS API Error] Could not send message. Please try again.`);
+    } finally {
+      setSendingOtpId(null); // Unlock the button
     }
   };
 
@@ -190,19 +199,28 @@ export default function GuardDashboard() {
     const { data } = await supabase.from("visitors").select("otp_code").eq("id", visitor.id).single();
     if (!data || data.otp_code !== otpInput.trim()) return alert("Incorrect OTP.");
     
-    await supabase.from("visitors").update({ status: "checked_in" }).eq("id", visitor.id);
+    // Exact verification timestamp saved to checked_in_at
+    await supabase.from("visitors").update({ 
+      status: "checked_in",
+      checked_in_at: new Date().toISOString()
+    }).eq("id", visitor.id);
+    
     setVerifyingId(null);
   };
 
   const handleCheckOut = async (id: string) => {
-    await supabase.from("visitors").update({ status: "checked_out", checked_out_at: new Date().toISOString() }).eq("id", id);
+    await supabase.from("visitors").update({ 
+      status: "checked_out", 
+      checked_out_at: new Date().toISOString() 
+    }).eq("id", id);
   };
 
   // --- UI Calculated Variables with Search & Status Filter ---
   const filteredVisitors = visitors.filter((v) => {
     const matchesSearch = v.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           v.phone?.includes(searchTerm) ||
-                          v.id_number?.includes(searchTerm);
+                          v.id_number?.includes(searchTerm) ||
+                          v.vehicle_reg?.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === "all" || v.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
@@ -333,7 +351,7 @@ export default function GuardDashboard() {
                 <Table>
                   <TableHeader>
                     <TableRow className="border-zinc-200/50">
-                      <TableHead>Time</TableHead>
+                      <TableHead>Arrived</TableHead>
                       <TableHead>Visitor Details</TableHead>
                       <TableHead>Phone & ID</TableHead>
                       <TableHead>Status</TableHead>
@@ -343,6 +361,7 @@ export default function GuardDashboard() {
                   <TableBody>
                     {filteredVisitors.map((visitor) => (
                       <TableRow key={visitor.id} className="border-zinc-200/50 hover:bg-zinc-50/50">
+                        {/* Arrival Time */}
                         <TableCell className="font-medium text-zinc-500">
                           {new Date(visitor.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                         </TableCell>
@@ -409,7 +428,14 @@ export default function GuardDashboard() {
                                 <Button size="sm" variant="ghost" onClick={() => setVerifyingId(null)}>Cancel</Button>
                               </div>
                             ) : (
-                              <Button size="sm" onClick={() => handleSendOTP(visitor.id, visitor.phone)} className="whitespace-nowrap bg-white hover:bg-zinc-100 text-zinc-900 border border-zinc-200 shadow-sm">Verify & Send OTP</Button>
+                              <Button 
+                                size="sm" 
+                                onClick={() => handleSendOTP(visitor.id, visitor.phone)} 
+                                disabled={sendingOtpId === visitor.id}
+                                className="whitespace-nowrap bg-white hover:bg-zinc-100 text-zinc-900 border border-zinc-200 shadow-sm disabled:opacity-50"
+                              >
+                                {sendingOtpId === visitor.id ? "Sending..." : "Verify & Send OTP"}
+                              </Button>
                             )
                           ) : (
                             <Button size="sm" variant="secondary" onClick={() => handleCheckOut(visitor.id)} className="whitespace-nowrap bg-white/60 hover:bg-zinc-100 text-zinc-700 shadow-sm">Check Out</Button>

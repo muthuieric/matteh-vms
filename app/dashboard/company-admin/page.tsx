@@ -161,12 +161,8 @@ export default function AdminDashboard() {
     const headers = ["Date", "Visitor Name", "Phone Number", "Document Type", "ID Number", "Host Name", "Purpose", "Vehicle Reg", "Status", "Time In", "Time Out"];
     const csvRows = filteredVisitors.map((v) => {
       const date = new Date(v.created_at).toLocaleDateString();
-      
       const timeIn = new Date(v.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        
-      const timeOut = v.checked_out_at 
-        ? new Date(v.checked_out_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
-        : "--";
+      const timeOut = v.checked_out_at ? new Date(v.checked_out_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "--";
       
       return [
         `"${date}"`,
