@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import {
@@ -13,7 +14,7 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Download, Filter, Info, X } from "lucide-react";
+import { Download, Filter, Info, X, UserCircle } from "lucide-react";
 
 // Define the shape of our Visitor data
 type Visitor = {
@@ -28,6 +29,7 @@ type Visitor = {
   host_name?: string;
   purpose?: string;
   vehicle_reg?: string;
+  photo_url?: string; // ADDED: For displaying the security selfie
 };
 
 export default function AdminDashboard() {
@@ -41,8 +43,9 @@ export default function AdminDashboard() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
 
-  // Modal State
+  // Modal States
   const [infoModalVisitor, setInfoModalVisitor] = useState<Visitor | null>(null);
+  const [enlargedPhoto, setEnlargedPhoto] = useState<string | null>(null); // ADDED: State for photo lightbox
 
   useEffect(() => {
     const fetchInitialData = async () => {
@@ -359,20 +362,41 @@ export default function AdminDashboard() {
                           {new Date(visitor.created_at).toLocaleDateString()}
                         </TableCell>
                         <TableCell>
-                          <div className="flex items-center gap-2">
-                            <span className="font-semibold text-zinc-900 whitespace-nowrap">{visitor.name}</span>
-                            {/* INFO BUTTON MODAL TRIGGER */}
-                            {(visitor.host_name || visitor.purpose || visitor.vehicle_reg) && (
-                              <button
-                                onClick={() => setInfoModalVisitor(visitor)}
-                                className="text-blue-600 bg-blue-50 hover:bg-blue-100 p-1.5 rounded-full transition-colors shrink-0 shadow-sm border border-blue-100"
-                                title="View Visit Info"
-                              >
-                                <Info className="w-3.5 h-3.5" />
-                              </button>
+                          <div className="flex items-center gap-3">
+                            {/* NEW: DISPLAY PHOTO OR PLACEHOLDER */}
+                            {visitor.photo_url ? (
+                              <Image 
+                                src={visitor.photo_url} 
+                                alt={`${visitor.name}'s photo`} 
+                                width={40}
+                                height={40}
+                                className="w-10 h-10 rounded-full object-cover border-2 border-zinc-200 cursor-pointer hover:opacity-80 transition-opacity bg-white shrink-0"
+                                onClick={() => setEnlargedPhoto(visitor.photo_url!)}
+                                unoptimized
+                              />
+                            ) : (
+                              <div className="w-10 h-10 rounded-full bg-zinc-100 flex items-center justify-center border-2 border-zinc-200 text-zinc-400 shrink-0">
+                                <UserCircle className="w-6 h-6" />
+                              </div>
                             )}
+
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-semibold text-zinc-900 whitespace-nowrap">{visitor.name}</span>
+                                {/* INFO BUTTON MODAL TRIGGER */}
+                                {(visitor.host_name || visitor.purpose || visitor.vehicle_reg) && (
+                                  <button
+                                    onClick={() => setInfoModalVisitor(visitor)}
+                                    className="text-blue-600 bg-blue-50 hover:bg-blue-100 p-1.5 rounded-full transition-colors shrink-0 shadow-sm border border-blue-100"
+                                    title="View Visit Info"
+                                  >
+                                    <Info className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                              <div className="text-xs text-zinc-500 whitespace-nowrap">{visitor.phone || "—"}</div>
+                            </div>
                           </div>
-                          <div className="text-xs text-zinc-500 whitespace-nowrap">{visitor.phone || "—"}</div>
                         </TableCell>
                         <TableCell>
                           <div className="text-sm whitespace-nowrap">{visitor.document_type || "—"}</div>
@@ -430,6 +454,32 @@ export default function AdminDashboard() {
               </div>
             </CardContent>
           </Card>
+        </div>
+      )}
+
+      {/* --- ENLARGED PHOTO LIGHTBOX MODAL --- */}
+      {enlargedPhoto && (
+        <div 
+          className="fixed inset-0 bg-black/90 z-[80] flex flex-col items-center justify-center p-4 cursor-pointer backdrop-blur-sm" 
+          onClick={() => setEnlargedPhoto(null)}
+        >
+          <div className="relative max-w-2xl w-full flex flex-col items-center">
+            <button 
+              className="absolute -top-12 right-0 text-white/70 hover:text-white transition-colors p-2"
+              onClick={(e) => { e.stopPropagation(); setEnlargedPhoto(null); }}
+            >
+              <X size={32} />
+            </button>
+            <Image 
+              src={enlargedPhoto} 
+              alt="Enlarged security photo" 
+              width={1000}
+              height={1000}
+              className="w-full h-auto rounded-lg shadow-[0_0_50px_rgba(0,0,0,0.5)] border-4 border-zinc-800 object-contain max-h-[85vh]" 
+              onClick={(e) => e.stopPropagation()} 
+              unoptimized
+            />
+          </div>
         </div>
       )}
 
