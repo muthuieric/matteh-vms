@@ -63,7 +63,18 @@ export default function SuperadminTransactionsPage() {
 
       if (txError) throw txError;
 
-      setTransactions(txData || []);
+      // Safely map and cast the returned data to satisfy TypeScript
+      const formattedData: Transaction[] = (txData || []).map((tx: any) => ({
+        id: tx.id,
+        created_at: tx.created_at,
+        amount: tx.amount,
+        tracking_id: tx.tracking_id,
+        status: tx.status,
+        // Safely extract the object if Supabase returns an array
+        companies: Array.isArray(tx.companies) ? tx.companies[0] : tx.companies,
+      }));
+
+      setTransactions(formattedData);
     } catch (err: any) {
       console.error("Error fetching master transactions:", err);
       setError(err.message || "An error occurred while loading the global transaction history.");

@@ -126,7 +126,7 @@ export default function SuperadminBillingPage() {
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-zinc-400" />
               <Input 
                 placeholder="Search company name..." 
-                className="pl-9 bg-white/80 border-zinc-200 focus:ring-blue-500 w-full"
+                className="pl-9 bg-white/80 border-zinc-200 focus:ring-blue-50 w-full"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
@@ -193,7 +193,7 @@ export default function SuperadminBillingPage() {
                             <div className="flex items-center gap-2">
                               <Building2 className="w-4 h-4 text-zinc-400 shrink-0" />
                               <span className="truncate max-w-[250px]">{company.name}</span>
-                              {(company.is_locked || isExpired) && <Lock className="inline h-3.5 w-3.5 text-red-600 shrink-0" title="Account Locked"/>}
+                              {(company.is_locked || isExpired) && <Lock className="inline h-3.5 w-3.5 text-red-600 shrink-0" />}
                             </div>
                           </TableCell>
                           
@@ -240,7 +240,7 @@ export default function SuperadminBillingPage() {
                         <div className="font-semibold text-zinc-900 flex items-start gap-2 leading-tight">
                           <Building2 className="w-4 h-4 text-zinc-400 shrink-0 mt-0.5" />
                           <span className="line-clamp-2">{company.name}</span>
-                          {(company.is_locked || isExpired) && <Lock className="inline h-3.5 w-3.5 text-red-600 shrink-0 mt-0.5" title="Account Locked"/>}
+                          {(company.is_locked || isExpired) && <Lock className="inline h-3.5 w-3.5 text-red-600 shrink-0 mt-0.5" />}
                         </div>
                         <div className="font-bold text-emerald-600 text-right whitespace-nowrap">
                           {company.amount_paid.toLocaleString()} <span className="text-xs font-medium text-emerald-600/70">KES</span>

@@ -265,7 +265,11 @@ export default function ManageCompaniesPage() {
                           <div className="flex items-center gap-2">
                             <Building2 className="w-4 h-4 text-zinc-400 shrink-0" />
                             <span className="truncate max-w-[250px]">{company.name}</span>
-                            {company.is_locked && <Lock className="inline h-3.5 w-3.5 text-red-600 shrink-0" title="Account Locked"/>}
+                            {company.is_locked && (
+                              <span title="Account Locked">
+                                <Lock className="inline h-3.5 w-3.5 text-red-600 shrink-0" />
+                              </span>
+                            )}
                           </div>
                         </TableCell>
                         <TableCell className="whitespace-nowrap">
@@ -311,7 +315,11 @@ export default function ManageCompaniesPage() {
                       <div className="font-semibold text-zinc-900 flex items-start gap-2 leading-tight">
                         <Building2 className="w-4 h-4 text-zinc-400 shrink-0 mt-0.5" />
                         <span className="line-clamp-2">{company.name}</span>
-                        {company.is_locked && <Lock className="inline h-3.5 w-3.5 text-red-600 shrink-0 mt-0.5" title="Account Locked"/>}
+                        {company.is_locked && (
+                          <span title="Account Locked">
+                            <Lock className="inline h-3.5 w-3.5 text-red-600 shrink-0 mt-0.5" />
+                          </span>
+                        )}
                       </div>
                       <div>
                         <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider border ${
@@ -359,7 +367,7 @@ export default function ManageCompaniesPage() {
       {showAddModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <Card className="w-full max-w-md shadow-2xl relative border-0 overflow-hidden bg-white">
-            <div className="absolute top-0 left-0 w-full h-1.5 bg-black-600"></div>
+            <div className="absolute top-0 left-0 w-full h-1.5 bg-indigo-600"></div>
             <button onClick={() => setShowAddModal(false)} className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-900 bg-zinc-100 hover:bg-zinc-200 rounded-full p-1.5 transition-colors">
               <X size={18} />
             </button>
@@ -405,7 +413,7 @@ export default function ManageCompaniesPage() {
       {showAdminModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <Card className="w-full max-w-md shadow-2xl relative border-0 overflow-hidden bg-white">
-            <div className="absolute top-0 left-0 w-full h-1.5 bg-black-600"></div>
+            <div className="absolute top-0 left-0 w-full h-1.5 bg-blue-600"></div>
             <button onClick={() => setShowAdminModal(false)} className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-900 bg-zinc-100 hover:bg-zinc-200 rounded-full p-1.5 transition-colors">
               <X size={18} />
             </button>
@@ -463,7 +471,7 @@ export default function ManageCompaniesPage() {
       {showVisitorsModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <Card className="w-full max-w-md shadow-2xl relative border-0 overflow-hidden bg-white">
-            <div className="absolute top-0 left-0 w-full h-1.5 bg-black-600"></div>
+            <div className="absolute top-0 left-0 w-full h-1.5 bg-indigo-600"></div>
             <button onClick={() => setShowVisitorsModal(false)} className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-900 bg-zinc-100 hover:bg-zinc-200 rounded-full p-1.5 transition-colors">
               <X size={18} />
             </button>
