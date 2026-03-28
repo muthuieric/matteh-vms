@@ -2,19 +2,15 @@
 
 import { useState } from "react";
 import { useParams } from "next/navigation";
-import { supabase } from "@/lib/supabase"; 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 export default function VisitorCheckout() {
-  const params = useParams<{ companyId: string }>();
+  const params = useParams();
 
-  // Form State
   const [otp, setOtp] = useState("");
-
-  // UI State
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,45 +20,32 @@ export default function VisitorCheckout() {
     setLoading(true);
     setError(null);
 
-    if (!params?.companyId) {
+    // Safely get the company ID from the URL params
+    const resolvedCompanyId = params?.companyId || params?.["company-id"];
+
+    if (!resolvedCompanyId) {
       setError("Invalid checkout link. Company ID is missing.");
       setLoading(false);
       return;
     }
 
     try {
-      // 1. Find the active visitor record using ONLY the OTP code
-      const { data: visitors, error: fetchError } = await supabase
-        .from("visitors")
-        .select("*")
-        .eq("company_id", params.companyId)
-        .eq("otp_code", otp.trim())
-        .eq("status", "checked_in") // Only look for people currently inside
-        .order("created_at", { ascending: false })
-        .limit(1);
+      // Send the OTP to our secure backend API
+      const response = await fetch("/api/visitors/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          companyId: resolvedCompanyId,
+          otp: otp,
+        }),
+      });
 
-      if (fetchError) throw fetchError;
+      const data = await response.json();
 
-      if (!visitors || visitors.length === 0) {
-        setError("Invalid verification code or no active check-in found.");
-        setLoading(false);
-        return;
+      if (!response.ok) {
+        throw new Error(data.error || "Checkout failed");
       }
 
-      const activeVisitor = visitors[0];
-
-      // 2. Check them out!
-      const { error: updateError } = await supabase
-        .from("visitors")
-        .update({
-          status: "checked_out",
-          checked_out_at: new Date().toISOString()
-        })
-        .eq("id", activeVisitor.id);
-
-      if (updateError) throw updateError;
-
-      // 3. Show success screen
       setSuccess(true);
     } catch (err: any) {
       console.error("Checkout Error:", err);
@@ -72,7 +55,6 @@ export default function VisitorCheckout() {
     }
   };
 
-  // What the user sees AFTER successfully checking out
   if (success) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-zinc-50 p-4">
@@ -88,7 +70,6 @@ export default function VisitorCheckout() {
     );
   }
 
-  // The main checkout form
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 p-4">
       <Card className="w-full max-w-md shadow-lg border-t-4 border-t-red-600">

@@ -8,7 +8,7 @@ const supabaseAdmin = createClient(
 );
 
 /**
- * SECURITY HELPER: Verifies the caller is a company_admin and belongs to the correct company
+ * SECURITY HELPER: Verifies the caller is a company admin and belongs to the correct company
  */
 async function verifyAdminCaller(request: Request, targetCompanyId?: string) {
   const authHeader = request.headers.get('Authorization');
@@ -31,13 +31,17 @@ async function verifyAdminCaller(request: Request, targetCompanyId?: string) {
     .eq('id', user.id)
     .single();
 
-  // FIX: Exact match with your database roles (company_admin and super_admin)
-  if (!profile || (profile.role !== 'company_admin' && profile.role !== 'super_admin')) {
+  // --- CRITICAL FIX: Accept ALL possible variations of the admin role in your database ---
+  const validAdminRoles = ['company_admin', 'company-admin', 'super_admin', 'superadmin'];
+  
+  if (!profile || !validAdminRoles.includes(profile.role)) {
+    console.error(`[API] Role mismatch! Blocked user with role: ${profile?.role}`);
     return { error: "Forbidden: You do not have admin privileges", status: 403 };
   }
 
-  // 3. Ensure they are only modifying their OWN company (unless they are super_admin)
-  if (targetCompanyId && profile.role !== 'super_admin' && profile.company_id !== targetCompanyId) {
+  // 3. Ensure they are only modifying their OWN company (unless they are a super admin)
+  const isSuperAdmin = ['super_admin', 'superadmin'].includes(profile.role);
+  if (targetCompanyId && !isSuperAdmin && profile.company_id !== targetCompanyId) {
     return { error: "Forbidden: You cannot modify another company's data", status: 403 };
   }
 
