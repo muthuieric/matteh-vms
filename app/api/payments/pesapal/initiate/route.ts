@@ -1,62 +1,62 @@
 import { NextResponse } from "next/server";
-import { getPesapalToken } from "@/lib/pesapal";
+import { submitOrder } from "@/lib/pesapal"; 
 
 export async function POST(req: Request) {
   try {
-    const { companyId, amount } = await req.json();
+    const { companyId, months } = await req.json();
 
-    if (!companyId) {
-      return NextResponse.json({ error: "Missing company ID" }, { status: 400 });
+    if (!companyId || !months) {
+      return NextResponse.json({ error: "Missing parameters" }, { status: 400 });
     }
 
-    const token = await getPesapalToken();
+    // --- SECURITY FIX START ---
+    // The server calculates the price where the user cannot manipulate it
+    const validMonths = [1, 2, 6, 12];
+    const parsedMonths = Number(months);
 
-    // Generate a unique 5-digit number to avoid duplicate order IDs
-    const shortRandom = Math.floor(10000 + Math.random() * 90000);
-    const uniqueMerchantReference = `${companyId}-${shortRandom}`;
+    if (!validMonths.includes(parsedMonths)) {
+      return NextResponse.json({ error: "Invalid subscription duration" }, { status: 400 });
+    }
 
-    // Ensure we have an amount, fallback to 5000 just in case
-    const paymentAmount = amount || 5000;
+    const amountToCharge = parsedMonths * 5000;
+    // --- SECURITY FIX END ---
 
-    const orderPayload = {
-      id: uniqueMerchantReference, 
+    // Generate a unique merchant reference combining company ID and timestamp
+    const merchantReference = `${companyId}-${Date.now()}`;
+
+    const orderData = {
+      id: merchantReference,
       currency: "KES",
-      amount: paymentAmount,
-      description: `VMS Global Standard Plan - KES ${paymentAmount}`,
-      callback_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/company-admin/payment-success`,
-      notification_id: process.env.PESAPAL_IPN_ID,
+      amount: amountToCharge, // Safe, server-calculated amount
+      description: `VMS Subscription - ${parsedMonths} Month(s)`,
+      callback_url: `${process.env.NEXT_PUBLIC_BASE_URL}/dashboard/company-admin/payment-success`,
+      notification_id: process.env.PESAPAL_IPN_ID!,
       billing_address: {
-        email_address: "admin@vmsglobal.com", 
-        phone_number: "0700000000",
+        email_address: "admin@company.com", // You can pull actual email from DB if needed
+        phone_number: "0706123513",
         country_code: "KE",
         first_name: "Admin",
-        last_name: "User",
-        line_1: "Nairobi",
-        city: "Nairobi",
+        middle_name: "",
+        last_name: "",
+        line_1: "",
+        line_2: "",
+        city: "",
+        state: "",
+        postal_code: "",
+        zip_code: ""
       }
     };
 
-    const response = await fetch(`${process.env.PESAPAL_BASE_URL}/api/Transactions/SubmitOrderRequest`, {
-      method: "POST",
-      headers: {
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${token}`
-      },
-      body: JSON.stringify(orderPayload)
-    });
+    const response = await submitOrder(orderData);
 
-    const data = await response.json();
-
-    if (data.error) {
-      console.error("PesaPal Error:", data.error);
-      throw new Error(data.error.message || "Failed to initiate transaction");
+    if (response && response.redirect_url) {
+      return NextResponse.json({ redirect_url: response.redirect_url });
+    } else {
+      throw new Error("Invalid response from Pesapal");
     }
 
-    return NextResponse.json({ redirect_url: data.redirect_url });
-
-  } catch (error: any) {
-    console.error("Initiation Error:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error) {
+    console.error("Pesapal Initiate Error:", error);
+    return NextResponse.json({ error: "Failed to initiate payment" }, { status: 500 });
   }
 }
