@@ -44,7 +44,8 @@ export async function POST(req: Request) {
       }
 
       // Calculate exactly how many full months they paid for.
-      const monthsToAdd = Math.floor(amountPaid / 5000);
+      // CHANGED FROM 5000 TO 10 FOR TESTING
+      const monthsToAdd = Math.floor(amountPaid / 10);
 
       // Prevent Partial Payment Exploit
       if (monthsToAdd < 1) {
@@ -115,7 +116,9 @@ export async function POST(req: Request) {
       
       const actualCompanyId = secureMerchantReference.substring(0, 36);
       const amountReversed = Number(statusData.amount);
-      const monthsToRevoke = Math.floor(amountReversed / 5000);
+      
+      // CHANGED FROM 5000 TO 10 FOR TESTING
+      const monthsToRevoke = Math.floor(amountReversed / 10);
 
       if (monthsToRevoke >= 1) {
         // 1. Check if we actually processed this as 'Completed' before

@@ -3,23 +3,51 @@ import { submitOrder } from "@/lib/pesapal";
 
 export async function POST(req: Request) {
   try {
-    const { companyId, months } = await req.json();
+    const body = await req.json();
+    
+    // DEBUG LOG: This will show you exactly what your frontend is sending
+    console.log("[PESAPAL INITIATE] Received body:", body);
 
-    if (!companyId || !months) {
-      return NextResponse.json({ error: "Missing parameters" }, { status: 400 });
+    const companyId = body.companyId || body.company_id || body.id || body.company;
+    
+    // FIX: Look for 'months', but if the frontend sends 'amount' instead, convert it!
+    let months = body.months || body.duration || body.monthsToPay || body.plan;
+    
+    if (!months && body.amount) {
+      // Example: 5000 / 5000 = 1 month. 
+      // Math.max(1, ...) ensures that if you send '10' for testing, it still defaults to 1 month.
+      months = Math.max(1, Math.round(Number(body.amount) / 5000)); 
     }
 
-    // --- SECURITY FIX START ---
-    // The server calculates the price where the user cannot manipulate it
+    if (!companyId || !months) {
+      console.error("[PESAPAL INITIATE] Missing parameters! We got:", body);
+      return NextResponse.json({ 
+        error: `Missing parameters! We received: ${JSON.stringify(body)}` 
+      }, { status: 400 });
+    }
+
+    // Security check: The server calculates the price where the user cannot manipulate it
     const validMonths = [1, 2, 6, 12];
     const parsedMonths = Number(months);
 
-    if (!validMonths.includes(parsedMonths)) {
-      return NextResponse.json({ error: "Invalid subscription duration" }, { status: 400 });
+    if (isNaN(parsedMonths) || !validMonths.includes(parsedMonths)) {
+      return NextResponse.json({ 
+        error: `Invalid subscription duration. Calculated: ${months} months` 
+      }, { status: 400 });
     }
 
-    const amountToCharge = parsedMonths * 5000;
-    // --- SECURITY FIX END ---
+    // CHANGED TO 10 FOR TESTING (10 KES per month). 
+    // Change back to 5000 when going live!
+    const amountToCharge = parsedMonths * 10; 
+
+    // --- NEW: STRICT ENVIRONMENT VARIABLE CHECKS ---
+    if (!process.env.PESAPAL_IPN_ID) {
+      console.error("[PESAPAL INITIATE] Missing PESAPAL_IPN_ID in .env file!");
+      return NextResponse.json({ error: "Server Error: Missing PESAPAL_IPN_ID in your .env file." }, { status: 500 });
+    }
+
+    // Fallback to localhost if BASE_URL is missing during local testing
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
 
     // Generate a unique merchant reference combining company ID and timestamp
     const merchantReference = `${companyId}-${Date.now()}`;
@@ -27,12 +55,12 @@ export async function POST(req: Request) {
     const orderData = {
       id: merchantReference,
       currency: "KES",
-      amount: amountToCharge, // Safe, server-calculated amount
+      amount: amountToCharge, 
       description: `VMS Subscription - ${parsedMonths} Month(s)`,
-      callback_url: `${process.env.NEXT_PUBLIC_BASE_URL}/dashboard/company-admin/payment-success`,
-      notification_id: process.env.PESAPAL_IPN_ID!,
+      callback_url: `${baseUrl}/dashboard/company-admin/payment-success`,
+      notification_id: process.env.PESAPAL_IPN_ID,
       billing_address: {
-        email_address: "admin@company.com", // You can pull actual email from DB if needed
+        email_address: "admin@company.com", 
         phone_number: "0706123513",
         country_code: "KE",
         first_name: "Admin",
@@ -46,6 +74,8 @@ export async function POST(req: Request) {
         zip_code: ""
       }
     };
+    
+    console.log("[PESAPAL INITIATE] Sending Order Data to Pesapal:", orderData);
 
     const response = await submitOrder(orderData);
 
@@ -55,8 +85,9 @@ export async function POST(req: Request) {
       throw new Error("Invalid response from Pesapal");
     }
 
-  } catch (error) {
+  } catch (error: any) {
     console.error("Pesapal Initiate Error:", error);
-    return NextResponse.json({ error: "Failed to initiate payment" }, { status: 500 });
+    // Return Pesapal's exact error message so we know exactly what they are rejecting
+    return NextResponse.json({ error: error.message || "Failed to initiate payment" }, { status: 500 });
   }
 }
