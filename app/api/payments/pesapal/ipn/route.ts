@@ -7,8 +7,8 @@ export async function POST(req: Request) {
     const { searchParams } = new URL(req.url);
     const orderTrackingId = searchParams.get("OrderTrackingId");
     
-    // We still read this to satisfy Pesapal's required response format, 
-    // BUT WE WILL NOT TRUST IT for updating the database.
+    // We read this to satisfy Pesapal's required response format, 
+    // BUT WE WILL NOT TRUST IT for updating the database (Credit Hijacking Prevention).
     const urlMerchantReference = searchParams.get("OrderMerchantReference");
 
     if (!orderTrackingId || !urlMerchantReference) {
@@ -23,11 +23,11 @@ export async function POST(req: Request) {
     // 1. Fetch the secure, tamper-proof transaction data directly from Pesapal
     const statusData = await getTransactionStatus(orderTrackingId);
 
+    // ============================================================================
+    // SCENARIO 1: SUCCESSFUL PAYMENT
+    // ============================================================================
     if (statusData.status_code === 1) { // 1 = Completed
       
-      // --- SECURITY FIX: PREVENT CREDIT HIJACKING ---
-      // ONLY trust the merchant reference returned by Pesapal's secure server, 
-      // NOT the one passed in the public webhook URL.
       const secureMerchantReference = statusData.merchant_reference;
       
       if (!secureMerchantReference) {
@@ -36,29 +36,22 @@ export async function POST(req: Request) {
       }
 
       const actualCompanyId = secureMerchantReference.substring(0, 36);
-      // ----------------------------------------------
-
-      // Strictly parse the amount and ensure it is a valid, positive number.
       const amountPaid = Number(statusData.amount);
       
       if (isNaN(amountPaid) || amountPaid <= 0) {
-        console.error(`[IPN] Critical: Invalid amount (${statusData.amount}) received for tracking ID: ${orderTrackingId}`);
+        console.error(`[IPN] Critical: Invalid amount (${statusData.amount}) received.`);
         return NextResponse.json({ error: "Invalid payment amount" }, { status: 400 });
       }
 
-      // --- SECURITY FIX: PREVENT PARTIAL PAYMENT EXPLOIT ---
       // Calculate exactly how many full months they paid for.
       const monthsToAdd = Math.floor(amountPaid / 5000);
 
-      // If they paid less than 5000 KES, they don't even get 1 month. Block the upgrade.
+      // Prevent Partial Payment Exploit
       if (monthsToAdd < 1) {
-        console.error(`[IPN] Insufficient funds: ${amountPaid} paid, but 5000 minimum required. Tracking ID: ${orderTrackingId}`);
         return NextResponse.json({ error: "Insufficient payment amount" }, { status: 400 });
       }
-      // -----------------------------------------------------
 
       // Try to INSERT the transaction FIRST using the database's UNIQUE constraint 
-      // to guarantee idempotency (preventing double-crediting if IPN fires twice).
       const { error: txError } = await supabaseAdmin
         .from('transactions')
         .insert({
@@ -68,7 +61,7 @@ export async function POST(req: Request) {
           status: 'Completed'
         });
 
-      // If NO error, we won the race! We are the first script to process this payment.
+      // If NO error, we are the first script to process this payment.
       if (!txError) {
         const { data: company, error: fetchError } = await supabaseAdmin
           .from('companies')
@@ -76,9 +69,7 @@ export async function POST(req: Request) {
           .eq('id', actualCompanyId)
           .single();
 
-        // --- RESILIENCE FIX 1: Missing Company Guard ---
         if (fetchError || !company) {
-          console.error(`[IPN] Company not found for ID: ${actualCompanyId}. Rolling back.`);
           await supabaseAdmin.from('transactions').delete().eq('tracking_id', orderTrackingId);
           return NextResponse.json({ error: "Company not found" }, { status: 404 });
         }
@@ -100,22 +91,77 @@ export async function POST(req: Request) {
           })
           .eq('id', actualCompanyId);
           
-        // --- RESILIENCE FIX 2: Rollback on Update Failure ---
         if (updateError) {
-          console.error(`[IPN] Failed to credit company ${actualCompanyId}. Rolling back.`, updateError);
-          // Delete the transaction so Pesapal's automatic retry will trigger the whole process again
+          // Rollback transaction if company update fails
           await supabaseAdmin.from('transactions').delete().eq('tracking_id', orderTrackingId);
           return NextResponse.json({ error: "Database update failed" }, { status: 500 });
         }
-        // ---------------------------------------------------
-
-        console.log(`[IPN] Processed payment successfully for: ${actualCompanyId}. Added ${monthsToAdd} month(s).`);
+        
+        console.log(`[IPN] Processed payment successfully for: ${actualCompanyId}`);
       } 
-      // '23505' is the database error code for "Unique Violation" (Already Exists)
       else if (txError.code === '23505') {
         console.log(`[IPN] Transaction ${orderTrackingId} already processed. Skipping.`);
       } else {
         console.error("[IPN] DB Insert Error:", txError);
+      }
+    } 
+    // ============================================================================
+    // SCENARIO 2: REVERSED / REFUNDED PAYMENT (CHARGEBACK)
+    // ============================================================================
+    else if (statusData.status_code === 3) { // 3 = Reversed in Pesapal
+      
+      const secureMerchantReference = statusData.merchant_reference;
+      if (!secureMerchantReference) return NextResponse.json({ error: "Invalid data" }, { status: 400 });
+      
+      const actualCompanyId = secureMerchantReference.substring(0, 36);
+      const amountReversed = Number(statusData.amount);
+      const monthsToRevoke = Math.floor(amountReversed / 5000);
+
+      if (monthsToRevoke >= 1) {
+        // 1. Check if we actually processed this as 'Completed' before
+        const { data: existingTx } = await supabaseAdmin
+          .from('transactions')
+          .select('status')
+          .eq('tracking_id', orderTrackingId)
+          .single();
+
+        if (existingTx && existingTx.status === 'Completed') {
+          console.warn(`[IPN] Payment REVERSED for tracking ID: ${orderTrackingId}. Revoking access.`);
+
+          // 2. Mark the transaction as Reversed
+          await supabaseAdmin
+            .from('transactions')
+            .update({ status: 'Reversed' })
+            .eq('tracking_id', orderTrackingId);
+
+          // 3. Fetch current company status
+          const { data: company } = await supabaseAdmin
+            .from('companies')
+            .select('subscription_ends_at, amount_paid')
+            .eq('id', actualCompanyId)
+            .single();
+
+          if (company && company.subscription_ends_at) {
+            // Subtract the months
+            let adjustedExpiry = new Date(company.subscription_ends_at);
+            adjustedExpiry.setMonth(adjustedExpiry.getMonth() - monthsToRevoke);
+
+            // If the new expiry date is in the past, lock the account
+            const isNowExpired = adjustedExpiry < new Date();
+
+            await supabaseAdmin
+              .from('companies')
+              .update({ 
+                 is_locked: isNowExpired,
+                 subscription_status: isNowExpired ? 'unpaid' : 'paid',
+                 amount_paid: Math.max(0, (company.amount_paid || 0) - amountReversed),
+                 subscription_ends_at: adjustedExpiry.toISOString(),
+              })
+              .eq('id', actualCompanyId);
+              
+            console.log(`[IPN] Successfully revoked ${monthsToRevoke} month(s) for company ${actualCompanyId}`);
+          }
+        }
       }
     }
 
@@ -123,7 +169,7 @@ export async function POST(req: Request) {
     return NextResponse.json({
       orderNotificationType: "IPN",
       orderTrackingId: orderTrackingId,
-      orderMerchantReference: urlMerchantReference, // Pesapal expects what they sent
+      orderMerchantReference: urlMerchantReference, 
       status: 200
     });
 
