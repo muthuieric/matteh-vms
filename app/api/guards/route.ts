@@ -8,14 +8,17 @@ const supabaseAdmin = createClient(
 );
 
 /**
- * SECURITY HELPER: Verifies the caller is a company-admin and belongs to the correct company
+ * SECURITY HELPER: Verifies the caller is a company_admin and belongs to the correct company
  */
 async function verifyAdminCaller(request: Request, targetCompanyId?: string) {
   const authHeader = request.headers.get('Authorization');
   if (!authHeader) return { error: "Missing Authorization header", status: 401 };
 
   const token = authHeader.replace('Bearer ', '');
-  const supabaseAnon = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
+  const supabaseAnon = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!, 
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
 
   // 1. Validate the token
   const { data: { user }, error: authError } = await supabaseAnon.auth.getUser(token);
@@ -28,18 +31,18 @@ async function verifyAdminCaller(request: Request, targetCompanyId?: string) {
     .eq('id', user.id)
     .single();
 
-  if (!profile || (profile.role !== 'company-admin' && profile.role !== 'superadmin')) {
+  // FIX: Exact match with your database roles (company_admin and super_admin)
+  if (!profile || (profile.role !== 'company_admin' && profile.role !== 'super_admin')) {
     return { error: "Forbidden: You do not have admin privileges", status: 403 };
   }
 
-  // 3. Ensure they are only modifying their OWN company (unless they are superadmin)
-  if (targetCompanyId && profile.role !== 'superadmin' && profile.company_id !== targetCompanyId) {
+  // 3. Ensure they are only modifying their OWN company (unless they are super_admin)
+  if (targetCompanyId && profile.role !== 'super_admin' && profile.company_id !== targetCompanyId) {
     return { error: "Forbidden: You cannot modify another company's data", status: 403 };
   }
 
   return { user, profile };
 }
-
 
 export async function POST(request: Request) {
   try {

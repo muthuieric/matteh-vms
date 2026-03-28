@@ -63,9 +63,21 @@ export default function ManageGuards() {
     setIsSubmitting(true);
 
     try {
+      // --- CRITICAL FIX 1: Get the auth token ---
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        alert("Session expired. Please log in again.");
+        return;
+      }
+
       const response = await fetch("/api/guards", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          // Send the token to the backend
+          "Authorization": `Bearer ${session.access_token}` 
+        },
         body: JSON.stringify({
           fullName: newGuard.name,
           email: newGuard.email,
@@ -97,8 +109,19 @@ export default function ManageGuards() {
     if (!confirmDelete) return;
 
     try {
+      // --- CRITICAL FIX 2: Get the auth token for deleting as well ---
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        alert("Session expired. Please log in again.");
+        return;
+      }
+
       const response = await fetch(`/api/guards?id=${id}`, {
         method: "DELETE",
+        headers: {
+          "Authorization": `Bearer ${session.access_token}` // Send token for deletion
+        }
       });
 
       const result = await response.json();
