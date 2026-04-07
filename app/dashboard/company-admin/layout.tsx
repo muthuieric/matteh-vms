@@ -5,11 +5,13 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { 
   LayoutDashboard, QrCode, Shield, LogOut, AlertOctagon, 
-  CreditCard, Loader2, Settings, Menu, X, FileText 
+  CreditCard, Loader2, Settings, Menu, X, FileText, ListPlus 
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+
+
 
 export default function CompanyAdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -179,7 +181,7 @@ export default function CompanyAdminLayout({ children }: { children: React.React
               <Link href="/dashboard/company-admin" onClick={() => setIsMobileMenuOpen(false)} className={`flex items-center gap-3 px-3 py-3 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100/50"}`}><LayoutDashboard size={20} /> Overview</Link>
               <Link href="/dashboard/company-admin/qr" onClick={() => setIsMobileMenuOpen(false)} className={`flex items-center gap-3 px-3 py-3 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/qr" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100/50"}`}><QrCode size={20} /> Gate QR Code</Link>
               <Link href="/dashboard/company-admin/guards" onClick={() => setIsMobileMenuOpen(false)} className={`flex items-center gap-3 px-3 py-3 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/guards" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100/50"}`}><Shield size={20} /> Security Team</Link>
-              <Link href="/dashboard/company-admin/reports" onClick={() => setIsMobileMenuOpen(false)} className={`flex items-center gap-3 px-3 py-3 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/reports" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100/50"}`}><FileText size={20} /> Reports & Logs</Link>
+              <Link href="/dashboard/company-admin/rules" onClick={() => setIsMobileMenuOpen(false)} className={`flex items-center gap-3 px-3 py-3 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/rules" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100/50"}`}><ListPlus size={20} /> Building Rules</Link>
               <Link href="/dashboard/company-admin/billing" onClick={() => setIsMobileMenuOpen(false)} className={`flex items-center gap-3 px-3 py-3 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/billing" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100/50"}`}><CreditCard size={20} /> Billing</Link>
               <Link href="/dashboard/company-admin/settings" onClick={() => setIsMobileMenuOpen(false)} className={`flex items-center gap-3 px-3 py-3 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/settings" ? "text-blue-700 bg-blue-50" : "text-zinc-600 hover:bg-zinc-100/50"}`}><Settings size={20} /> Settings</Link>
             </nav>
@@ -199,7 +201,7 @@ export default function CompanyAdminLayout({ children }: { children: React.React
           <Link href="/dashboard/company-admin" className={`flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin" ? "text-blue-700 bg-blue-50/80 shadow-sm" : "text-zinc-600 hover:bg-zinc-100/50"}`}><LayoutDashboard size={18} /> Overview</Link>
           <Link href="/dashboard/company-admin/qr" className={`flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/qr" ? "text-blue-700 bg-blue-50/80 shadow-sm" : "text-zinc-600 hover:bg-zinc-100/50"}`}><QrCode size={18} /> Gate QR Code</Link>
           <Link href="/dashboard/company-admin/guards" className={`flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/guards" ? "text-blue-700 bg-blue-50/80 shadow-sm" : "text-zinc-600 hover:bg-zinc-100/50"}`}><Shield size={18} /> Security Team</Link>
-          {/* <Link href="/dashboard/company-admin/reports" className={`flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/reports" ? "text-blue-700 bg-blue-50/80 shadow-sm" : "text-zinc-600 hover:bg-zinc-100/50"}`}><FileText size={18} /> Reports & Logs</Link> */}
+          <Link href="/dashboard/company-admin/rules" className={`flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/rules" ? "text-blue-700 bg-blue-50/80 shadow-sm" : "text-zinc-600 hover:bg-zinc-100/50"}`}><ListPlus size={18} /> Building Rules</Link>
           <Link href="/dashboard/company-admin/billing" className={`flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/billing" ? "text-blue-700 bg-blue-50/80 shadow-sm" : "text-zinc-600 hover:bg-zinc-100/50"}`}><CreditCard size={18} /> Billing</Link>
           <Link href="/dashboard/company-admin/settings" className={`flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors font-medium text-sm ${pathname === "/dashboard/company-admin/settings" ? "text-blue-700 bg-blue-50/80 shadow-sm" : "text-zinc-600 hover:bg-zinc-100/50"}`}><Settings size={18} /> Settings</Link>
         </nav>

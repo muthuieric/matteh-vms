@@ -13,6 +13,13 @@ import PhoneInput from "react-phone-input-2";
 import "react-phone-input-2/lib/style.css";
 import { compressImage } from "@/lib/image-compression";
 
+// NEW: Define the structure for custom fields
+type CustomField = {
+  id: string;
+  label: string;
+  active: boolean;
+};
+
 export default function PublicGateCheckIn() {
   const params = useParams();
   const companyId = params.companyId as string;
@@ -31,6 +38,10 @@ export default function PublicGateCheckIn() {
     askPurpose: false,
     askVehicle: false
   });
+  
+  // NEW: State for Custom Fields and their Answers
+  const [customFields, setCustomFields] = useState<CustomField[]>([]);
+  const [customAnswers, setCustomAnswers] = useState<Record<string, string>>({});
 
   // Form State
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -50,9 +61,10 @@ export default function PublicGateCheckIn() {
     const fetchCompanyData = async () => {
       if (!companyId) return;
 
+      // UPDATE: Fetch custom_fields from companies table
       const { data: company, error } = await supabase
         .from("companies")
-        .select("name, is_locked, subscription_ends_at, require_photo, ask_phone, ask_id, ask_host, ask_purpose, ask_vehicle")
+        .select("name, is_locked, subscription_ends_at, require_photo, ask_phone, ask_id, ask_host, ask_purpose, ask_vehicle, custom_fields")
         .eq("id", companyId)
         .single();
 
@@ -79,6 +91,12 @@ export default function PublicGateCheckIn() {
         askPurpose: company.ask_purpose || false,
         askVehicle: company.ask_vehicle || false
       });
+      
+      // NEW: Set active custom fields
+      if (company.custom_fields) {
+        const activeFields = (company.custom_fields as CustomField[]).filter(f => f.active);
+        setCustomFields(activeFields);
+      }
 
       setLoading(false);
     };
@@ -181,7 +199,8 @@ export default function PublicGateCheckIn() {
           purpose: rules.askPurpose ? newVisitor.purpose : null,
           vehicle_reg: rules.askVehicle ? newVisitor.vehicle_reg : null,
           status: "pending",
-          photo_url: uploadedPhotoUrl
+          photo_url: uploadedPhotoUrl,
+          custom_data: customAnswers // NEW: Save custom answers to the JSONB column
         }
       ]);
 
@@ -360,6 +379,19 @@ export default function PublicGateCheckIn() {
                 />
               </div>
             )}
+
+            {/* NEW: DYNAMIC CUSTOM FIELDS RENDERING */}
+            {customFields.map((field) => (
+              <div key={field.id}>
+                <Label className="mb-1 block font-semibold text-zinc-700">{field.label}</Label>
+                <Input 
+                  value={customAnswers[field.id] || ""} 
+                  onChange={(e) => setCustomAnswers({...customAnswers, [field.id]: e.target.value})} 
+                  placeholder={`Enter ${field.label.toLowerCase()}`} 
+                  className="h-12 bg-zinc-50"
+                />
+              </div>
+            ))}
 
             {/* SECURITY PHOTO - ONLY VISIBLE IF ADMIN TOGGLED IT ON */}
             {rules.requirePhoto && (

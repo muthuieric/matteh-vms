@@ -35,6 +35,7 @@ type Visitor = {
   host_name?: string;
   purpose?: string;
   vehicle_reg?: string;
+  custom_data?: Record<string, string>; // Holds dynamic form answers
 };
 
 export default function GuardDashboard() {
@@ -44,6 +45,9 @@ export default function GuardDashboard() {
   
   // State to securely hold the logged-in guard's assigned building/company
   const [companyId, setCompanyId] = useState<string | null>(null);
+  
+  // State to hold our custom field mapping
+  const [customFieldLabels, setCustomFieldLabels] = useState<Record<string, string>>({});
   
   // Search and Filter State
   const [searchTerm, setSearchTerm] = useState("");
@@ -59,7 +63,7 @@ export default function GuardDashboard() {
 
   // OTP & Request States
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
-  const [sendingOtpId, setSendingOtpId] = useState<string | null>(null); // Prevents double-clicks
+  const [sendingOtpId, setSendingOtpId] = useState<string | null>(null); 
   const [otpInput, setOtpInput] = useState("");
 
   // Modals State
@@ -94,10 +98,10 @@ export default function GuardDashboard() {
       const currentCompanyId = profileData.company_id;
       setCompanyId(currentCompanyId);
 
-      // 3. Fetch company rules (Photo, Phone, ID, Host, Purpose, Vehicle toggles)
+      // 3. Fetch company rules & custom fields mapping
       const { data: companyData } = await supabase
         .from("companies")
-        .select("require_photo, ask_phone, ask_id, ask_host, ask_purpose, ask_vehicle")
+        .select("require_photo, ask_phone, ask_id, ask_host, ask_purpose, ask_vehicle, custom_fields")
         .eq("id", currentCompanyId)
         .single();
         
@@ -108,6 +112,15 @@ export default function GuardDashboard() {
         setAskHost(companyData.ask_host || false);
         setAskPurpose(companyData.ask_purpose || false);
         setAskVehicle(companyData.ask_vehicle || false);
+
+        if (companyData.custom_fields) {
+          const labelMap: Record<string, string> = {};
+          // @ts-ignore
+          companyData.custom_fields.forEach((f: any) => {
+            labelMap[f.id] = f.label;
+          });
+          setCustomFieldLabels(labelMap);
+        }
       }
 
       // 4. Fetch ONLY the visitors for this specific guard's building
@@ -159,15 +172,14 @@ export default function GuardDashboard() {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    // CHANGED: Force a hard refresh to bypass Next.js cache and ensure session clears
     window.location.href = "/login";
   };
 
   // --- OTP LOGIC WITH DOUBLE-CLICK PREVENTION ---
   const handleSendOTP = async (id: string, phone: string) => {
-    if (sendingOtpId === id) return; // Prevent double execution
+    if (sendingOtpId === id) return; 
     
-    setSendingOtpId(id); // Lock the button
+    setSendingOtpId(id); 
 
     try {
       let code = "";
@@ -191,7 +203,7 @@ export default function GuardDashboard() {
       console.error(err);
       alert(`[SMS API Error] Could not send message. Please try again.`);
     } finally {
-      setSendingOtpId(null); // Unlock the button
+      setSendingOtpId(null); 
     }
   };
 
@@ -199,7 +211,6 @@ export default function GuardDashboard() {
     const { data } = await supabase.from("visitors").select("otp_code").eq("id", visitor.id).single();
     if (!data || data.otp_code !== otpInput.trim()) return alert("Incorrect OTP.");
     
-    // Exact verification timestamp saved to checked_in_at
     await supabase.from("visitors").update({ 
       status: "checked_in",
       checked_in_at: new Date().toISOString()
@@ -217,10 +228,21 @@ export default function GuardDashboard() {
 
   // --- UI Calculated Variables with Search & Status Filter ---
   const filteredVisitors = visitors.filter((v) => {
-    const matchesSearch = v.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          v.phone?.includes(searchTerm) ||
-                          v.id_number?.includes(searchTerm) ||
-                          v.vehicle_reg?.toLowerCase().includes(searchTerm.toLowerCase());
+    const query = searchTerm.toLowerCase();
+    
+    let matchesSearch = v.name?.toLowerCase().includes(query) ||
+                        v.phone?.includes(searchTerm) ||
+                        v.id_number?.includes(searchTerm) ||
+                        v.host_name?.toLowerCase().includes(query) ||
+                        v.vehicle_reg?.toLowerCase().includes(query);
+
+    // Search within custom fields
+    if (!matchesSearch && v.custom_data) {
+      matchesSearch = Object.values(v.custom_data).some(val => 
+        val && val.toLowerCase().includes(query)
+      );
+    }
+
     const matchesStatus = statusFilter === "all" || v.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
@@ -246,7 +268,7 @@ export default function GuardDashboard() {
       <div className="fixed bottom-[-10%] right-[-10%] h-[500px] w-[500px] rounded-full bg-zinc-400/20 blur-[100px] pointer-events-none z-0" />
       {/* --------------------------- */}
 
-      <div className="max-w-6xl mx-auto space-y-6 relative z-10">
+      <div className="max-w-7xl mx-auto space-y-6 relative z-10">
         
         {/* Header Section */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -359,90 +381,95 @@ export default function GuardDashboard() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredVisitors.map((visitor) => (
-                      <TableRow key={visitor.id} className="border-zinc-200/50 hover:bg-zinc-50/50">
-                        {/* Arrival Time */}
-                        <TableCell className="font-medium text-zinc-500">
-                          {new Date(visitor.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                        </TableCell>
-                        
-                        {/* Photo, Name, and Info Button Column */}
-                        <TableCell>
-                          <div className="flex items-center gap-3">
-                            {visitor.photo_url ? (
-                              <Image 
-                                src={visitor.photo_url} 
-                                alt={`${visitor.name}'s photo`} 
-                                width={40}
-                                height={40}
-                                className="w-10 h-10 rounded-full object-cover border-2 border-zinc-200 cursor-pointer hover:opacity-80 transition-opacity bg-white shrink-0"
-                                onClick={() => setEnlargedPhoto(visitor.photo_url!)}
-                                unoptimized
-                              />
-                            ) : (
-                              <div className="w-10 h-10 rounded-full bg-zinc-100 flex items-center justify-center border-2 border-zinc-200 text-zinc-400 shrink-0">
-                                <UserCircle className="w-6 h-6" />
-                              </div>
-                            )}
-                            
-                            <div className="flex items-center gap-2">
-                              <span className="font-semibold whitespace-nowrap">{visitor.name}</span>
-                              
-                              {/* VIEW DETAILS BUTTON - ONLY SHOWS IF EXTRA DATA EXISTS */}
-                              {(visitor.host_name || visitor.purpose || visitor.vehicle_reg) && (
-                                <button
-                                  onClick={() => setInfoModalVisitor(visitor)}
-                                  className="text-blue-600 bg-blue-50 hover:bg-blue-100 p-1.5 rounded-full transition-colors shrink-0 shadow-sm border border-blue-100"
-                                  title="View Visit Info"
-                                >
-                                  <Info className="w-3.5 h-3.5" />
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        </TableCell>
+                    {filteredVisitors.map((visitor) => {
+                      const hasCustomData = visitor.custom_data && Object.values(visitor.custom_data).some(val => val.trim() !== "");
+                      const hasExtraInfo = visitor.host_name || visitor.purpose || visitor.vehicle_reg || hasCustomData;
 
-                        <TableCell>
-                          <div className="text-sm">{visitor.phone || "—"}</div>
-                          <div className="text-xs text-zinc-500">{visitor.id_number || "No ID"}</div>
-                        </TableCell>
-                        
-                        <TableCell>
-                          {visitor.status === "pending" ? (
-                            <span className="inline-flex items-center rounded-full bg-amber-100/80 px-2.5 py-0.5 text-xs font-semibold text-amber-800 whitespace-nowrap border border-amber-200/50">Pending</span>
-                          ) : (
-                            <span className="inline-flex items-center rounded-full bg-green-100/80 px-2.5 py-0.5 text-xs font-semibold text-green-800 whitespace-nowrap border border-green-200/50">Checked In</span>
-                          )}
-                        </TableCell>
-
-                        <TableCell className="text-right">
-                          {visitor.status === "pending" ? (
-                            verifyingId === visitor.id ? (
-                              <div className="flex items-center justify-end gap-2">
-                                <input 
-                                  type="text" maxLength={4} placeholder="OTP"
-                                  className="w-16 rounded border px-2 py-1 text-center text-sm bg-white"
-                                  value={otpInput} onChange={(e) => setOtpInput(e.target.value)}
+                      return (
+                        <TableRow key={visitor.id} className="border-zinc-200/50 hover:bg-zinc-50/50">
+                          {/* Arrival Time */}
+                          <TableCell className="font-medium text-zinc-500 whitespace-nowrap">
+                            {new Date(visitor.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          </TableCell>
+                          
+                          {/* Photo, Name, and Info Button */}
+                          <TableCell>
+                            <div className="flex items-center gap-3">
+                              {visitor.photo_url ? (
+                                <Image 
+                                  src={visitor.photo_url} 
+                                  alt={`${visitor.name}'s photo`} 
+                                  width={40}
+                                  height={40}
+                                  className="w-10 h-10 rounded-full object-cover border-2 border-zinc-200 cursor-pointer hover:opacity-80 transition-opacity bg-white shrink-0"
+                                  onClick={() => setEnlargedPhoto(visitor.photo_url!)}
+                                  unoptimized
                                 />
-                                <Button size="sm" onClick={() => handleConfirmOTP(visitor)}>Confirm</Button>
-                                <Button size="sm" variant="ghost" onClick={() => setVerifyingId(null)}>Cancel</Button>
+                              ) : (
+                                <div className="w-10 h-10 rounded-full bg-zinc-100 flex items-center justify-center border-2 border-zinc-200 text-zinc-400 shrink-0">
+                                  <UserCircle className="w-6 h-6" />
+                                </div>
+                              )}
+                              
+                              <div className="flex items-center gap-2">
+                                <span className="font-semibold whitespace-nowrap">{visitor.name}</span>
+                                
+                                {/* Info button - visible on all screens if there is extra info */}
+                                {hasExtraInfo && (
+                                  <button
+                                    onClick={() => setInfoModalVisitor(visitor)}
+                                    className="text-blue-600 bg-blue-50 hover:bg-blue-100 p-1.5 rounded-full transition-colors shrink-0 shadow-sm border border-blue-100"
+                                    title="View Visit Info"
+                                  >
+                                    <Info className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
                               </div>
+                            </div>
+                          </TableCell>
+
+                          <TableCell>
+                            <div className="text-sm whitespace-nowrap">{visitor.phone || "—"}</div>
+                            <div className="text-xs text-zinc-500 whitespace-nowrap">{visitor.id_number || "No ID"}</div>
+                          </TableCell>
+                          
+                          <TableCell>
+                            {visitor.status === "pending" ? (
+                              <span className="inline-flex items-center rounded-full bg-amber-100/80 px-2.5 py-0.5 text-xs font-semibold text-amber-800 whitespace-nowrap border border-amber-200/50">Pending</span>
                             ) : (
-                              <Button 
-                                size="sm" 
-                                onClick={() => handleSendOTP(visitor.id, visitor.phone)} 
-                                disabled={sendingOtpId === visitor.id}
-                                className="whitespace-nowrap bg-white hover:bg-zinc-100 text-zinc-900 border border-zinc-200 shadow-sm disabled:opacity-50"
-                              >
-                                {sendingOtpId === visitor.id ? "Sending..." : "Verify & Send OTP"}
-                              </Button>
-                            )
-                          ) : (
-                            <Button size="sm" variant="secondary" onClick={() => handleCheckOut(visitor.id)} className="whitespace-nowrap bg-white/60 hover:bg-zinc-100 text-zinc-700 shadow-sm">Check Out</Button>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                              <span className="inline-flex items-center rounded-full bg-green-100/80 px-2.5 py-0.5 text-xs font-semibold text-green-800 whitespace-nowrap border border-green-200/50">Checked In</span>
+                            )}
+                          </TableCell>
+
+                          <TableCell className="text-right">
+                            {visitor.status === "pending" ? (
+                              verifyingId === visitor.id ? (
+                                <div className="flex items-center justify-end gap-2">
+                                  <input 
+                                    type="text" maxLength={4} placeholder="OTP"
+                                    className="w-16 rounded border px-2 py-1 text-center text-sm bg-white"
+                                    value={otpInput} onChange={(e) => setOtpInput(e.target.value)}
+                                  />
+                                  <Button size="sm" onClick={() => handleConfirmOTP(visitor)}>Confirm</Button>
+                                  <Button size="sm" variant="ghost" onClick={() => setVerifyingId(null)}>Cancel</Button>
+                                </div>
+                              ) : (
+                                <Button 
+                                  size="sm" 
+                                  onClick={() => handleSendOTP(visitor.id, visitor.phone)} 
+                                  disabled={sendingOtpId === visitor.id}
+                                  className="whitespace-nowrap bg-white hover:bg-zinc-100 text-zinc-900 border border-zinc-200 shadow-sm disabled:opacity-50"
+                                >
+                                  {sendingOtpId === visitor.id ? "Sending..." : "Verify & Send OTP"}
+                                </Button>
+                              )
+                            ) : (
+                              <Button size="sm" variant="secondary" onClick={() => handleCheckOut(visitor.id)} className="whitespace-nowrap bg-white/60 hover:bg-zinc-100 text-zinc-700 shadow-sm">Check Out</Button>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </div>
@@ -467,7 +494,7 @@ export default function GuardDashboard() {
       {/* --- EXTRA VISIT INFO MODAL --- */}
       {infoModalVisitor && (
         <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4 backdrop-blur-sm">
-          <Card className="w-full max-w-sm shadow-2xl relative border-0 overflow-hidden bg-white">
+          <Card className="w-full max-w-sm shadow-2xl relative border-0 overflow-hidden bg-white max-h-[80vh] overflow-y-auto">
             <div className="absolute top-0 left-0 w-full h-1.5 bg-blue-500"></div>
             <button onClick={() => setInfoModalVisitor(null)} className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-900 bg-zinc-100 hover:bg-zinc-200 rounded-full p-1.5 transition-colors">
               <X size={18} />
@@ -477,18 +504,39 @@ export default function GuardDashboard() {
               <CardDescription>Extra information provided by {infoModalVisitor.name}.</CardDescription>
             </CardHeader>
             <CardContent className="p-6 space-y-5 bg-zinc-50/50">
-              <div>
-                <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1">Host Name</p>
-                <p className="font-medium text-zinc-900 text-lg leading-snug">{infoModalVisitor.host_name || "—"}</p>
-              </div>
-              <div>
-                <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1">Purpose of Visit</p>
-                <p className="font-medium text-zinc-900 text-lg leading-snug">{infoModalVisitor.purpose || "—"}</p>
-              </div>
-              <div>
-                <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1">Vehicle Registration</p>
-                <p className="font-mono font-medium text-zinc-900 text-lg leading-snug">{infoModalVisitor.vehicle_reg || "—"}</p>
-              </div>
+              
+              {/* Standard Fields */}
+              {infoModalVisitor.host_name && (
+                <div>
+                  <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1">Host Name</p>
+                  <p className="font-medium text-zinc-900 text-lg leading-snug">{infoModalVisitor.host_name}</p>
+                </div>
+              )}
+              {infoModalVisitor.purpose && (
+                <div>
+                  <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1">Purpose of Visit</p>
+                  <p className="font-medium text-zinc-900 text-lg leading-snug">{infoModalVisitor.purpose}</p>
+                </div>
+              )}
+              {infoModalVisitor.vehicle_reg && (
+                <div>
+                  <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1">Vehicle Registration</p>
+                  <p className="font-mono font-medium text-zinc-900 text-lg leading-snug">{infoModalVisitor.vehicle_reg}</p>
+                </div>
+              )}
+
+              {/* DYNAMIC CUSTOM FIELDS */}
+              {infoModalVisitor.custom_data && Object.entries(infoModalVisitor.custom_data).map(([fieldId, value]) => {
+                if (!value.trim()) return null; // Don't show empty fields
+                const label = customFieldLabels[fieldId] || "Custom Field";
+                return (
+                  <div key={fieldId}>
+                    <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1">{label}</p>
+                    <p className="font-medium text-zinc-900 text-lg leading-snug">{value}</p>
+                  </div>
+                );
+              })}
+              
             </CardContent>
           </Card>
         </div>

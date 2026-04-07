@@ -29,13 +29,17 @@ type Visitor = {
   host_name?: string;
   purpose?: string;
   vehicle_reg?: string;
-  photo_url?: string; // ADDED: For displaying the security selfie
+  photo_url?: string; 
+  custom_data?: Record<string, string>; // ADDED: To hold our dynamic form answers
 };
 
 export default function AdminDashboard() {
   const [visitors, setVisitors] = useState<Visitor[]>([]);
   const [lifetimeVisitors, setLifetimeVisitors] = useState(0);
   const [loading, setLoading] = useState(true);
+  
+  // NEW: State to hold our custom field mapping (so we know ID '1712...' is 'Laptop Serial')
+  const [customFieldLabels, setCustomFieldLabels] = useState<Record<string, string>>({});
   
   // Filter States
   const [searchQuery, setSearchQuery] = useState("");
@@ -45,12 +49,11 @@ export default function AdminDashboard() {
 
   // Modal States
   const [infoModalVisitor, setInfoModalVisitor] = useState<Visitor | null>(null);
-  const [enlargedPhoto, setEnlargedPhoto] = useState<string | null>(null); // ADDED: State for photo lightbox
+  const [enlargedPhoto, setEnlargedPhoto] = useState<string | null>(null); 
 
   useEffect(() => {
     const fetchInitialData = async () => {
       // --- AUTO-CHECKOUT SCRIPT ---
-      // Automatically check out any 'pending' or 'checked_in' visitors from previous days
       const startOfToday = new Date();
       startOfToday.setHours(0, 0, 0, 0);
 
@@ -68,7 +71,34 @@ export default function AdminDashboard() {
       }
       // ----------------------------
 
-      // 1. Fetch up to 2000 visitors so historical date filtering works properly in the table
+      // NEW: Fetch company ID and custom fields mapping
+      const { data: authData } = await supabase.auth.getUser();
+      if (authData?.user) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("company_id")
+          .eq("id", authData.user.id)
+          .single();
+
+        if (profile?.company_id) {
+          const { data: comp } = await supabase
+            .from("companies")
+            .select("custom_fields")
+            .eq("id", profile.company_id)
+            .single();
+
+          if (comp?.custom_fields) {
+            const labelMap: Record<string, string> = {};
+            // @ts-ignore
+            comp.custom_fields.forEach((f: any) => {
+              labelMap[f.id] = f.label;
+            });
+            setCustomFieldLabels(labelMap);
+          }
+        }
+      }
+
+      // 1. Fetch up to 2000 visitors
       const { data, error } = await supabase
         .from("visitors")
         .select("*")
@@ -81,7 +111,7 @@ export default function AdminDashboard() {
         setVisitors(data || []);
       }
 
-      // 2. Fetch the exact lifetime count for the all-time stat card (bypasses the 2000 limit)
+      // 2. Fetch the exact lifetime count
       const { count, error: countError } = await supabase
         .from("visitors")
         .select("*", { count: "exact", head: true });
@@ -95,7 +125,7 @@ export default function AdminDashboard() {
 
     fetchInitialData();
 
-    // Subscribe to real-time changes so the admin sees live gate activity
+    // Subscribe to real-time changes
     const channel = supabase
       .channel("admin-dashboard")
       .on(
@@ -104,14 +134,14 @@ export default function AdminDashboard() {
         (payload) => {
           if (payload.eventType === "INSERT") {
             setVisitors((prev) => [payload.new as Visitor, ...prev]);
-            setLifetimeVisitors((prev) => prev + 1); // Instantly update lifetime count
+            setLifetimeVisitors((prev) => prev + 1); 
           } else if (payload.eventType === "UPDATE") {
             setVisitors((prev) =>
               prev.map((v) => (v.id === payload.new.id ? (payload.new as Visitor) : v))
             );
           } else if (payload.eventType === "DELETE") {
             setVisitors((prev) => prev.filter((v) => v.id !== payload.old.id));
-            setLifetimeVisitors((prev) => Math.max(0, prev - 1)); // Deduct from lifetime count safely
+            setLifetimeVisitors((prev) => Math.max(0, prev - 1)); 
           }
         }
       )
@@ -122,21 +152,27 @@ export default function AdminDashboard() {
     };
   }, []);
 
-  // Filter visitors based on search, status, and date range
+  // Filter visitors
   const filteredVisitors = visitors.filter((v) => {
-    // 1. Search Query
     const query = searchQuery.toLowerCase();
-    const matchesSearch = 
+    
+    // Check standard fields
+    let matchesSearch = 
       v.name.toLowerCase().includes(query) ||
       v.phone?.includes(query) ||
       (v.id_number && v.id_number.toLowerCase().includes(query)) ||
       (v.host_name && v.host_name.toLowerCase().includes(query)) ||
       (v.vehicle_reg && v.vehicle_reg.toLowerCase().includes(query));
 
-    // 2. Status Filter
+    // Also check inside custom fields for search matches
+    if (!matchesSearch && v.custom_data) {
+      matchesSearch = Object.values(v.custom_data).some(val => 
+        val && val.toLowerCase().includes(query)
+      );
+    }
+
     const matchesStatus = statusFilter === "all" || v.status === statusFilter;
 
-    // 3. Date Range Filter
     let matchesDate = true;
     const visitorTime = new Date(v.created_at).getTime();
     
@@ -147,7 +183,7 @@ export default function AdminDashboard() {
     
     if (endDate) {
       const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999); // Set to the very end of the selected day
+      end.setHours(23, 59, 59, 999); 
       if (visitorTime > end.getTime()) matchesDate = false;
     }
 
@@ -161,13 +197,22 @@ export default function AdminDashboard() {
       return;
     }
 
-    const headers = ["Date", "Visitor Name", "Phone Number", "Document Type", "ID Number", "Host Name", "Purpose", "Vehicle Reg", "Status", "Time In", "Time Out"];
+    // Include dynamically created fields in the CSV headers
+    const customFieldIds = Object.keys(customFieldLabels);
+    const customHeaders = customFieldIds.map(id => customFieldLabels[id]);
+    
+    const headers = [
+      "Date", "Visitor Name", "Phone Number", "Document Type", "ID Number", 
+      "Host Name", "Purpose", "Vehicle Reg", "Status", "Time In", "Time Out",
+      ...customHeaders // Add dynamic headers
+    ];
+    
     const csvRows = filteredVisitors.map((v) => {
       const date = new Date(v.created_at).toLocaleDateString();
       const timeIn = new Date(v.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const timeOut = v.checked_out_at ? new Date(v.checked_out_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "--";
       
-      return [
+      const standardData = [
         `"${date}"`,
         `"${v.name}"`,
         `"${v.phone || 'N/A'}"`,
@@ -179,7 +224,12 @@ export default function AdminDashboard() {
         `"${v.status.replace(/_/g, " ").toUpperCase()}"`,
         `"${timeIn}"`,
         `"${timeOut}"`
-      ].join(",");
+      ];
+
+      // Add dynamic field values
+      const customData = customFieldIds.map(id => `"${v.custom_data?.[id] || 'N/A'}"`);
+
+      return [...standardData, ...customData].join(",");
     });
 
     const csvContent = [headers.join(","), ...csvRows].join("\n");
@@ -356,68 +406,73 @@ export default function AdminDashboard() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredVisitors.map((visitor) => (
-                      <TableRow key={visitor.id}>
-                        <TableCell className="font-medium text-zinc-600 whitespace-nowrap">
-                          {new Date(visitor.created_at).toLocaleDateString()}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-3">
-                            {/* NEW: DISPLAY PHOTO OR PLACEHOLDER */}
-                            {visitor.photo_url ? (
-                              <Image 
-                                src={visitor.photo_url} 
-                                alt={`${visitor.name}'s photo`} 
-                                width={40}
-                                height={40}
-                                className="w-10 h-10 rounded-full object-cover border-2 border-zinc-200 cursor-pointer hover:opacity-80 transition-opacity bg-white shrink-0"
-                                onClick={() => setEnlargedPhoto(visitor.photo_url!)}
-                                unoptimized
-                              />
-                            ) : (
-                              <div className="w-10 h-10 rounded-full bg-zinc-100 flex items-center justify-center border-2 border-zinc-200 text-zinc-400 shrink-0">
-                                <UserCircle className="w-6 h-6" />
-                              </div>
-                            )}
+                    {filteredVisitors.map((visitor) => {
+                      // Check if there's any standard extra info OR custom info to show the Info Button
+                      const hasCustomData = visitor.custom_data && Object.values(visitor.custom_data).some(val => val.trim() !== "");
+                      const hasExtraInfo = visitor.host_name || visitor.purpose || visitor.vehicle_reg || hasCustomData;
 
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <span className="font-semibold text-zinc-900 whitespace-nowrap">{visitor.name}</span>
-                                {/* INFO BUTTON MODAL TRIGGER */}
-                                {(visitor.host_name || visitor.purpose || visitor.vehicle_reg) && (
-                                  <button
-                                    onClick={() => setInfoModalVisitor(visitor)}
-                                    className="text-blue-600 bg-blue-50 hover:bg-blue-100 p-1.5 rounded-full transition-colors shrink-0 shadow-sm border border-blue-100"
-                                    title="View Visit Info"
-                                  >
-                                    <Info className="w-3.5 h-3.5" />
-                                  </button>
-                                )}
+                      return (
+                        <TableRow key={visitor.id}>
+                          <TableCell className="font-medium text-zinc-600 whitespace-nowrap">
+                            {new Date(visitor.created_at).toLocaleDateString()}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-3">
+                              {visitor.photo_url ? (
+                                <Image 
+                                  src={visitor.photo_url} 
+                                  alt={`${visitor.name}'s photo`} 
+                                  width={40}
+                                  height={40}
+                                  className="w-10 h-10 rounded-full object-cover border-2 border-zinc-200 cursor-pointer hover:opacity-80 transition-opacity bg-white shrink-0"
+                                  onClick={() => setEnlargedPhoto(visitor.photo_url!)}
+                                  unoptimized
+                                />
+                              ) : (
+                                <div className="w-10 h-10 rounded-full bg-zinc-100 flex items-center justify-center border-2 border-zinc-200 text-zinc-400 shrink-0">
+                                  <UserCircle className="w-6 h-6" />
+                                </div>
+                              )}
+
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-semibold text-zinc-900 whitespace-nowrap">{visitor.name}</span>
+                                  {/* INFO BUTTON MODAL TRIGGER */}
+                                  {hasExtraInfo && (
+                                    <button
+                                      onClick={() => setInfoModalVisitor(visitor)}
+                                      className="text-blue-600 bg-blue-50 hover:bg-blue-100 p-1.5 rounded-full transition-colors shrink-0 shadow-sm border border-blue-100"
+                                      title="View Visit Info"
+                                    >
+                                      <Info className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                </div>
+                                <div className="text-xs text-zinc-500 whitespace-nowrap">{visitor.phone || "—"}</div>
                               </div>
-                              <div className="text-xs text-zinc-500 whitespace-nowrap">{visitor.phone || "—"}</div>
                             </div>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="text-sm whitespace-nowrap">{visitor.document_type || "—"}</div>
-                          <div className="text-xs text-zinc-500 whitespace-nowrap">{visitor.id_number || "N/A"}</div>
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap">
-                          {visitor.status === "pending" && <span className="text-amber-600 text-xs font-bold uppercase">Pending</span>}
-                          {visitor.status === "checked_in" && <span className="text-green-600 text-xs font-bold uppercase">Inside</span>}
-                          {visitor.status === "checked_out" && <span className="text-zinc-500 text-xs font-bold uppercase">Departed</span>}
-                          {visitor.status === "auto_checked_out" && <span className="text-purple-600 text-xs font-bold uppercase">Auto-Departed</span>}
-                        </TableCell>
-                        <TableCell className="text-sm whitespace-nowrap">
-                          {new Date(visitor.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </TableCell>
-                        <TableCell className="text-sm text-zinc-500 whitespace-nowrap">
-                          {visitor.checked_out_at 
-                            ? new Date(visitor.checked_out_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
-                            : "--"}
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                          </TableCell>
+                          <TableCell>
+                            <div className="text-sm whitespace-nowrap">{visitor.document_type || "—"}</div>
+                            <div className="text-xs text-zinc-500 whitespace-nowrap">{visitor.id_number || "N/A"}</div>
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap">
+                            {visitor.status === "pending" && <span className="text-amber-600 text-xs font-bold uppercase">Pending</span>}
+                            {visitor.status === "checked_in" && <span className="text-green-600 text-xs font-bold uppercase">Inside</span>}
+                            {visitor.status === "checked_out" && <span className="text-zinc-500 text-xs font-bold uppercase">Departed</span>}
+                            {visitor.status === "auto_checked_out" && <span className="text-purple-600 text-xs font-bold uppercase">Auto-Departed</span>}
+                          </TableCell>
+                          <TableCell className="text-sm whitespace-nowrap">
+                            {new Date(visitor.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </TableCell>
+                          <TableCell className="text-sm text-zinc-500 whitespace-nowrap">
+                            {visitor.checked_out_at 
+                              ? new Date(visitor.checked_out_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+                              : "--"}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </div>
@@ -430,7 +485,7 @@ export default function AdminDashboard() {
       {/* --- EXTRA VISIT INFO MODAL --- */}
       {infoModalVisitor && (
         <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4 backdrop-blur-sm">
-          <Card className="w-full max-w-sm shadow-2xl relative border-0 overflow-hidden bg-white">
+          <Card className="w-full max-w-sm shadow-2xl relative border-0 overflow-hidden bg-white max-h-[80vh] overflow-y-auto">
             <div className="absolute top-0 left-0 w-full h-1.5 bg-blue-500"></div>
             <button onClick={() => setInfoModalVisitor(null)} className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-900 bg-zinc-100 hover:bg-zinc-200 rounded-full p-1.5 transition-colors">
               <X size={18} />
@@ -440,18 +495,39 @@ export default function AdminDashboard() {
               <CardDescription>Extra information provided by {infoModalVisitor.name}.</CardDescription>
             </CardHeader>
             <CardContent className="p-6 space-y-5 bg-zinc-50/50">
-              <div>
-                <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1">Host Name</p>
-                <p className="font-medium text-zinc-900 text-lg leading-snug">{infoModalVisitor.host_name || "—"}</p>
-              </div>
-              <div>
-                <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1">Purpose of Visit</p>
-                <p className="font-medium text-zinc-900 text-lg leading-snug">{infoModalVisitor.purpose || "—"}</p>
-              </div>
-              <div>
-                <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1">Vehicle Registration</p>
-                <p className="font-mono font-medium text-zinc-900 text-lg leading-snug">{infoModalVisitor.vehicle_reg || "—"}</p>
-              </div>
+              
+              {/* Standard Fields */}
+              {infoModalVisitor.host_name && (
+                <div>
+                  <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1">Host Name</p>
+                  <p className="font-medium text-zinc-900 text-lg leading-snug">{infoModalVisitor.host_name}</p>
+                </div>
+              )}
+              {infoModalVisitor.purpose && (
+                <div>
+                  <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1">Purpose of Visit</p>
+                  <p className="font-medium text-zinc-900 text-lg leading-snug">{infoModalVisitor.purpose}</p>
+                </div>
+              )}
+              {infoModalVisitor.vehicle_reg && (
+                <div>
+                  <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1">Vehicle Registration</p>
+                  <p className="font-mono font-medium text-zinc-900 text-lg leading-snug">{infoModalVisitor.vehicle_reg}</p>
+                </div>
+              )}
+
+              {/* DYNAMIC CUSTOM FIELDS */}
+              {infoModalVisitor.custom_data && Object.entries(infoModalVisitor.custom_data).map(([fieldId, value]) => {
+                if (!value.trim()) return null; // Don't show empty fields
+                const label = customFieldLabels[fieldId] || "Custom Field";
+                return (
+                  <div key={fieldId}>
+                    <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1">{label}</p>
+                    <p className="font-medium text-zinc-900 text-lg leading-snug">{value}</p>
+                  </div>
+                );
+              })}
+              
             </CardContent>
           </Card>
         </div>

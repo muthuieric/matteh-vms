@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import Image from "next/image";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,6 +12,12 @@ import PhoneInput from "react-phone-input-2";
 import "react-phone-input-2/lib/style.css";
 import { compressImage } from "@/lib/image-compression";
 
+// NEW: Define the structure for custom fields
+type CustomField = {
+  id: string;
+  label: string;
+  active: boolean;
+};
 
 type AddVisitorModalProps = {
   isOpen: boolean;
@@ -41,6 +47,10 @@ export default function AddVisitorModal({
     name: "", phone: "", id_number: "", doc_type: "National ID", host_name: "", purpose: "", vehicle_reg: "" 
   });
   
+  // NEW: State to hold Custom Fields and Answers
+  const [customFields, setCustomFields] = useState<CustomField[]>([]);
+  const [customAnswers, setCustomAnswers] = useState<Record<string, string>>({});
+
   // Selfie State
   const [selfieFile, setSelfieFile] = useState<File | null>(null);
   const [selfiePreview, setSelfiePreview] = useState<string | null>(null);
@@ -49,6 +59,24 @@ export default function AddVisitorModal({
   // OCR Camera State
   const [isScanning, setIsScanning] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // NEW: Fetch Custom Fields when the modal opens
+  useEffect(() => {
+    const fetchCustomFields = async () => {
+      if (!companyId || !isOpen) return;
+      const { data } = await supabase
+        .from("companies")
+        .select("custom_fields")
+        .eq("id", companyId)
+        .single();
+        
+      if (data?.custom_fields) {
+        const activeFields = (data.custom_fields as CustomField[]).filter(f => f.active);
+        setCustomFields(activeFields);
+      }
+    };
+    fetchCustomFields();
+  }, [companyId, isOpen]);
 
   if (!isOpen) return null;
 
@@ -151,7 +179,8 @@ export default function AddVisitorModal({
           purpose: askPurpose ? newVisitor.purpose : null,
           vehicle_reg: askVehicle ? newVisitor.vehicle_reg : null,
           status: "pending",
-          photo_url: uploadedPhotoUrl
+          photo_url: uploadedPhotoUrl,
+          custom_data: customAnswers // NEW: Save custom answers
         }
       ]);
 
@@ -159,6 +188,7 @@ export default function AddVisitorModal({
 
       // Reset form and close modal
       setNewVisitor({ name: "", phone: "", id_number: "", doc_type: "National ID", host_name: "", purpose: "", vehicle_reg: "" });
+      setCustomAnswers({}); // Reset custom answers
       setSelfieFile(null);
       setSelfiePreview(null);
       onClose();
@@ -289,6 +319,19 @@ export default function AddVisitorModal({
                 />
               </div>
             )}
+
+            {/* NEW: DYNAMIC CUSTOM FIELDS RENDERING */}
+            {customFields.map((field) => (
+              <div key={field.id}>
+                <Label className="mb-1 block font-semibold text-zinc-700">{field.label}</Label>
+                <Input 
+                  value={customAnswers[field.id] || ""} 
+                  onChange={(e) => setCustomAnswers({...customAnswers, [field.id]: e.target.value})} 
+                  placeholder={`Enter ${field.label.toLowerCase()}`} 
+                  className="h-10 bg-zinc-50"
+                />
+              </div>
+            ))}
 
             {/* SECURITY PHOTO - ONLY VISIBLE IF ADMIN TOGGLED IT ON */}
             {requirePhoto && (
