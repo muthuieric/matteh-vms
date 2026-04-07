@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Camera, Loader2, UserCircle, CheckCircle2, AlertOctagon, ScanLine } from "lucide-react";
 import PhoneInput from "react-phone-input-2";
 import "react-phone-input-2/lib/style.css";
+import { compressImage } from "@/lib/image-compression";
 
 export default function PublicGateCheckIn() {
   const params = useParams();
@@ -93,8 +94,11 @@ export default function PublicGateCheckIn() {
     setIsScanning(true);
 
     try {
+      // Compress the image before passing it to the OCR reader
+      const compressedFile = await compressImage(file);
       const reader = new FileReader();
-      reader.readAsDataURL(file);
+      reader.readAsDataURL(compressedFile);
+      
       reader.onloadend = async () => {
         const base64data = reader.result;
         const response = await fetch("/api/ocr", {
@@ -138,8 +142,11 @@ export default function PublicGateCheckIn() {
     try {
       // 1. Upload Selfie to Cloudflare R2 if present
       if (selfieFile) {
+        // Compress the security photo before sending it to the server
+        const compressedFile = await compressImage(selfieFile);
+        
         const formDataPayload = new FormData();
-        formDataPayload.append("file", selfieFile);
+        formDataPayload.append("file", compressedFile);
         formDataPayload.append("companyId", companyId);
 
         const uploadRes = await fetch("/api/upload", {
@@ -151,7 +158,8 @@ export default function PublicGateCheckIn() {
         if (uploadData.success) {
           uploadedPhotoUrl = uploadData.url;
         } else {
-          throw new Error("Failed to securely upload security photo.");
+          // Changed this to show the EXACT error the backend returns
+          throw new Error(uploadData.error || uploadData.message || "Backend rejected the photo for an unknown reason.");
         }
       }
 
@@ -204,7 +212,7 @@ export default function PublicGateCheckIn() {
     return (
       <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4">
         <Card className="max-w-md w-full border-red-900 bg-zinc-900 text-zinc-100 shadow-2xl text-center p-6">
-          <AlertOctagon className="w-16 h-16 text-red-500 mx-auto mb-4" />
+          <AlertOctagon className="w-16 h-16 text-red-50 mx-auto mb-4" />
           <CardTitle className="text-2xl font-bold text-white mb-2">Check-in Unavailable</CardTitle>
           <CardDescription className="text-zinc-400 text-base">
             This building's self-registration system is currently offline or suspended. Please speak directly to the security guard at the gate.

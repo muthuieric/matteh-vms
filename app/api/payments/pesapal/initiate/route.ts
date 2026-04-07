@@ -1,62 +1,65 @@
 import { NextResponse } from "next/server";
 import { submitOrder } from "@/lib/pesapal"; 
+import { createClient } from "@supabase/supabase-js";
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    
-    // DEBUG LOG: This will show you exactly what your frontend is sending
     console.log("[PESAPAL INITIATE] Received body:", body);
 
     const companyId = body.companyId || body.company_id || body.id || body.company;
-    
-    // FIX: Look for 'months', but if the frontend sends 'amount' instead, convert it!
-    let months = body.months || body.duration || body.monthsToPay || body.plan;
-    
-    if (!months && body.amount) {
-      // Example: 5000 / 5000 = 1 month. 
-      // Math.max(1, ...) ensures that if you send '10' for testing, it still defaults to 1 month.
-      months = Math.max(1, Math.round(Number(body.amount) / 5000)); 
+
+    if (!companyId) {
+      console.error("[PESAPAL INITIATE] Missing companyId!");
+      return NextResponse.json({ error: "Missing companyId parameter." }, { status: 400 });
     }
 
-    if (!companyId || !months) {
-      console.error("[PESAPAL INITIATE] Missing parameters! We got:", body);
-      return NextResponse.json({ 
-        error: `Missing parameters! We received: ${JSON.stringify(body)}` 
-      }, { status: 400 });
-    }
-
-    // Security check: The server calculates the price where the user cannot manipulate it
-    const validMonths = [1, 2, 6, 12];
-    const parsedMonths = Number(months);
-
-    if (isNaN(parsedMonths) || !validMonths.includes(parsedMonths)) {
-      return NextResponse.json({ 
-        error: `Invalid subscription duration. Calculated: ${months} months` 
-      }, { status: 400 });
-    }
-
-    // CHANGED TO 10 FOR TESTING (10 KES per month). 
-    // Change back to 5000 when going live!
-    const amountToCharge = parsedMonths * 10; 
-
-    // --- NEW: STRICT ENVIRONMENT VARIABLE CHECKS ---
     if (!process.env.PESAPAL_IPN_ID) {
       console.error("[PESAPAL INITIATE] Missing PESAPAL_IPN_ID in .env file!");
       return NextResponse.json({ error: "Server Error: Missing PESAPAL_IPN_ID in your .env file." }, { status: 500 });
     }
 
-    // Fallback to localhost if BASE_URL is missing during local testing
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
+    // =========================================================================
+    // SECURITY: CALCULATE USAGE ON THE SERVER
+    // We ignore any amount sent from the frontend to prevent tampering.
+    // =========================================================================
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Generate a unique merchant reference combining company ID and timestamp
+    // Calculate usage for the last 30 days
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    const { count, error } = await supabaseAdmin
+      .from("visitors")
+      .select("*", { count: "exact", head: true })
+      .eq("company_id", companyId)
+      .gte("created_at", thirtyDaysAgo.toISOString());
+
+    if (error) {
+      console.error("Error fetching visitor count:", error);
+      return NextResponse.json({ error: "Failed to calculate usage." }, { status: 500 });
+    }
+
+    const visitorCount = count || 0;
+    
+    // Set your rate here (3 KES based on your 500 * 3 = 1500 math)
+    const RATE_PER_VISITOR = 3; 
+    
+    // Pesapal will reject transactions that are too small (e.g., 0 KES).
+    // We enforce a minimum 10 KES charge so they can still process a payment 
+    // to unlock their account even if they had 0 visitors last month.
+    const amountToCharge = Math.max(visitorCount * RATE_PER_VISITOR, 10);
+
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
     const merchantReference = `${companyId}-${Date.now()}`;
 
     const orderData = {
       id: merchantReference,
       currency: "KES",
       amount: amountToCharge, 
-      description: `VMS Subscription - ${parsedMonths} Month(s)`,
+      description: `VMS Usage - ${visitorCount} Visitors`,
       callback_url: `${baseUrl}/dashboard/company-admin/payment-success`,
       notification_id: process.env.PESAPAL_IPN_ID,
       billing_address: {
@@ -87,7 +90,6 @@ export async function POST(req: Request) {
 
   } catch (error: any) {
     console.error("Pesapal Initiate Error:", error);
-    // Return Pesapal's exact error message so we know exactly what they are rejecting
     return NextResponse.json({ error: error.message || "Failed to initiate payment" }, { status: 500 });
   }
 }

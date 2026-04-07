@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"; 
-import { CreditCard, Loader2, CheckCircle2, AlertCircle, ArrowLeft, Calendar, Receipt } from "lucide-react";
+import { CreditCard, Loader2, CheckCircle2, AlertCircle, ArrowLeft, Calendar, Receipt, Users } from "lucide-react";
 
 export default function BillingPage() {
   const [companyId, setCompanyId] = useState<string | null>(null);
@@ -13,11 +13,15 @@ export default function BillingPage() {
   const [subscriptionStatus, setSubscriptionStatus] = useState<string>("Loading...");
   const [subscriptionEndsAt, setSubscriptionEndsAt] = useState<string | null>(null);
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
-  const [monthsToPay, setMonthsToPay] = useState(1);
   const [transactions, setTransactions] = useState<any[]>([]); 
+  const [visitorCount, setVisitorCount] = useState<number>(0);
   
   const [isInitializing, setIsInitializing] = useState(true);
   const [profileError, setProfileError] = useState<string | null>(null);
+
+  // This is purely visual for the UI. 
+  // The actual charge is strictly handled and protected on the server side.
+  const RATE_PER_VISITOR = 3; 
 
   useEffect(() => {
     const fetchBillingData = async () => {
@@ -36,10 +40,7 @@ export default function BillingPage() {
             .single();
 
           if (dbError) throw new Error(`Database Error: ${dbError.message}`);
-
-          if (!profile?.company_id) {
-            throw new Error("Your account profile exists, but it has no 'company_id' assigned to it.");
-          }
+          if (!profile?.company_id) throw new Error("Your account profile exists, but it has no 'company_id' assigned to it.");
 
           setCompanyId(profile.company_id);
           
@@ -57,7 +58,20 @@ export default function BillingPage() {
             setSubscriptionEndsAt(company.subscription_ends_at);
           }
 
-          // 2. Fetch Transaction History
+          // 2. Fetch Visitor Count for the last 30 days
+          const thirtyDaysAgo = new Date();
+          thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+          const { count, error: countError } = await supabase
+            .from("visitors")
+            .select("*", { count: "exact", head: true })
+            .eq("company_id", profile.company_id)
+            .gte("created_at", thirtyDaysAgo.toISOString());
+
+          if (countError) console.error("Error fetching visitor count:", countError);
+          setVisitorCount(count || 0);
+
+          // 3. Fetch Transaction History
           const { data: txData } = await supabase
             .from("transactions")
             .select("*")
@@ -77,6 +91,8 @@ export default function BillingPage() {
     fetchBillingData();
   }, []);
 
+  const totalDue = Math.max(visitorCount * RATE_PER_VISITOR, 10); 
+
   const handlePayment = async () => {
     if (!companyId) return;
     setIsPaying(true);
@@ -85,10 +101,8 @@ export default function BillingPage() {
       const response = await fetch("/api/payments/pesapal/initiate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          companyId,
-          amount: monthsToPay * 5000 
-        }), 
+        // We only send the companyId. The server calculates the cost to prevent hacking.
+        body: JSON.stringify({ companyId }), 
       });
 
       const data = await response.json();
@@ -128,10 +142,9 @@ export default function BillingPage() {
     <div className="min-h-screen bg-zinc-50 p-4 md:p-6">
       <div className="max-w-6xl mx-auto space-y-6 md:space-y-8">
         
-        {/* Header Section */}
         <div className="border-b border-zinc-200 pb-4">
-          <h1 className="text-2xl md:text-3xl font-bold text-zinc-900">Billing & Subscription</h1>
-          <p className="text-zinc-500 mt-1 text-sm md:text-base">Manage your building's active plan and payment methods.</p>
+          <h1 className="text-2xl md:text-3xl font-bold text-zinc-900">Billing & Usage</h1>
+          <p className="text-zinc-500 mt-1 text-sm md:text-base">Pay for your visitor volume to keep your account active.</p>
         </div>
 
         {profileError && (
@@ -144,12 +157,11 @@ export default function BillingPage() {
           </div>
         )}
 
-        {/* Cards Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
           <Card className="shadow-sm border-zinc-200">
             <CardHeader className="pb-4">
-              <CardTitle>Current Plan</CardTitle>
-              <CardDescription>Your organization's active tier</CardDescription>
+              <CardTitle>Current Status</CardTitle>
+              <CardDescription>Your organization's account standing</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="flex items-center space-x-4 bg-white p-4 rounded-xl border border-zinc-100 shadow-sm">
@@ -162,10 +174,10 @@ export default function BillingPage() {
                 </div>
                 <div>
                   <h3 className="text-lg md:text-xl font-bold uppercase tracking-wide text-zinc-900">
-                    {isInitializing ? 'Loading...' : isExpired ? 'Unpaid / Expired' : subscriptionStatus === 'trial' ? 'Trial Period' : 'Active - Standard'}
+                    {isInitializing ? 'Loading...' : isExpired ? 'Unpaid / Locked' : subscriptionStatus === 'trial' ? 'Trial Period' : 'Active'}
                   </h3>
                   <p className="text-sm text-zinc-500 mt-0.5">
-                    {isInitializing ? 'Fetching status...' : !isExpired ? 'All features unlocked.' : 'Please pay to ensure uninterrupted access.'}
+                    {isInitializing ? 'Fetching status...' : !isExpired ? 'Account is currently fully operational.' : 'Please pay your balance to unlock.'}
                   </p>
                 </div>
               </div>
@@ -186,28 +198,25 @@ export default function BillingPage() {
 
           <Card className="shadow-sm border-0 border-t-4 border-t-amber-500 bg-white">
             <CardHeader className="pb-4">
-              <CardTitle>Make a Payment</CardTitle>
-              <CardDescription>Secure checkout via Pesapal</CardDescription>
+              <CardTitle>Clear Usage Balance</CardTitle>
+              <CardDescription>Based on visitors over the last 30 days</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              <div>
-                <label className="block text-sm font-bold text-zinc-700 mb-2">Select Subscription Duration</label>
-                <select 
-                  value={monthsToPay} 
-                  onChange={(e) => setMonthsToPay(Number(e.target.value))}
-                  className="w-full border border-zinc-300 rounded-lg h-12 md:h-11 px-3 bg-white text-zinc-900 font-medium focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none transition-shadow"
-                >
-                  <option value={1}>1 Month (KES 5,000)</option>
-                  <option value={2}>2 Months (KES 10,000)</option>
-                  <option value={3}>3 Months (KES 15,000)</option>
-                  <option value={6}>6 Months (KES 30,000)</option>
-                  <option value={12}>1 Year (KES 60,000)</option>
-                </select>
+              
+              <div className="space-y-3">
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-zinc-600 flex items-center gap-2"><Users className="w-4 h-4"/> Visitor Count (30 Days)</span>
+                  <span className="font-bold text-zinc-900 text-lg">{visitorCount}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm border-b pb-3 border-zinc-100">
+                  <span className="text-zinc-600">Rate per Visitor</span>
+                  <span className="font-bold text-zinc-900">KES {RATE_PER_VISITOR}</span>
+                </div>
               </div>
 
               <div className="bg-zinc-50 p-4 rounded-xl border border-zinc-200 flex justify-between items-center shadow-inner">
                 <span className="font-semibold text-zinc-600 uppercase tracking-wider text-xs md:text-sm">Total Due</span>
-                <span className="font-black text-xl md:text-2xl text-zinc-900 tracking-tight">KES {(monthsToPay * 5000).toLocaleString()}</span>
+                <span className="font-black text-xl md:text-2xl text-zinc-900 tracking-tight">KES {totalDue.toLocaleString()}</span>
               </div>
               
               <Button 
@@ -216,18 +225,17 @@ export default function BillingPage() {
                 className="w-full h-14 md:h-12 text-base md:text-lg font-bold bg-amber-500 hover:bg-amber-600 text-zinc-900 shadow-md transition-all active:scale-[0.98]"
               >
                 {isInitializing ? (
-                  <><Loader2 className="w-5 h-5 mr-2 animate-spin" /> Verifying Profile...</>
+                  <><Loader2 className="w-5 h-5 mr-2 animate-spin" /> Verifying...</>
                 ) : isPaying ? (
                   <><Loader2 className="w-5 h-5 mr-2 animate-spin" /> Generating Checkout...</>
                 ) : (
-                  <><CreditCard className="w-5 h-5 mr-2" /> Pay Now via Pesapal</>
+                  <><CreditCard className="w-5 h-5 mr-2" /> Pay KES {totalDue.toLocaleString()} to Unlock</>
                 )}
               </Button>
             </CardContent>
           </Card>
         </div>
 
-        {/* --- TRANSACTION HISTORY TABLE --- */}
         <div className="pt-4 space-y-4">
           <div className="flex items-center gap-2 px-1">
             <Receipt className="w-5 h-5 text-zinc-500" />

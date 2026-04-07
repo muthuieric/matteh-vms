@@ -10,6 +10,8 @@ import { Label } from "@/components/ui/label";
 import { Camera, Loader2, X, UserCircle, ScanLine } from "lucide-react";
 import PhoneInput from "react-phone-input-2";
 import "react-phone-input-2/lib/style.css";
+import { compressImage } from "@/lib/image-compression";
+
 
 type AddVisitorModalProps = {
   isOpen: boolean;
@@ -58,8 +60,11 @@ export default function AddVisitorModal({
     setIsScanning(true);
 
     try {
+      // COMPRESS THE IMAGE BEFORE SENDING TO OCR
+      const compressedFile = await compressImage(file);
       const reader = new FileReader();
-      reader.readAsDataURL(file);
+      reader.readAsDataURL(compressedFile);
+      
       reader.onloadend = async () => {
         const base64data = reader.result;
         const response = await fetch("/api/ocr", {
@@ -108,8 +113,11 @@ export default function AddVisitorModal({
     try {
       // 1. Upload Selfie to Cloudflare R2 if present
       if (selfieFile) {
+        // COMPRESS THE SECURITY PHOTO BEFORE UPLOADING
+        const compressedFile = await compressImage(selfieFile);
+        
         const formDataPayload = new FormData();
-        formDataPayload.append("file", selfieFile);
+        formDataPayload.append("file", compressedFile);
         formDataPayload.append("companyId", companyId);
 
         const uploadRes = await fetch("/api/upload", {
