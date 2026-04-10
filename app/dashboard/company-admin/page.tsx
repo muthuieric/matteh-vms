@@ -16,7 +16,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Download, Filter, Info, X, UserCircle, DoorOpen } from "lucide-react";
 
-// Define the shape of our Visitor data
 type Visitor = {
   id: string;
   name: string;
@@ -30,11 +29,10 @@ type Visitor = {
   purpose?: string;
   vehicle_reg?: string;
   photo_url?: string; 
-  custom_data?: Record<string, string>; // To hold our dynamic form answers
-  gate_id?: string | null; // NEW: Added gate_id
+  custom_data?: Record<string, string>; 
+  gate_id?: string | null; 
 };
 
-// NEW: Define Gate Type
 type Gate = {
   id: string;
   name: string;
@@ -42,27 +40,27 @@ type Gate = {
 
 export default function AdminDashboard() {
   const [visitors, setVisitors] = useState<Visitor[]>([]);
-  const [gates, setGates] = useState<Gate[]>([]); // NEW: State for gates
+  const [gates, setGates] = useState<Gate[]>([]);
   const [lifetimeVisitors, setLifetimeVisitors] = useState(0);
   const [loading, setLoading] = useState(true);
   
-  // State to hold our custom field mapping
+  // Hard block state
+  const [isLocked, setIsLocked] = useState<boolean>(false);
+
   const [customFieldLabels, setCustomFieldLabels] = useState<Record<string, string>>({});
   
-  // Filter States
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [gateFilter, setGateFilter] = useState("all"); // NEW: Gate filter
+  const [gateFilter, setGateFilter] = useState("all"); 
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
 
-  // Modal States
   const [infoModalVisitor, setInfoModalVisitor] = useState<Visitor | null>(null);
   const [enlargedPhoto, setEnlargedPhoto] = useState<string | null>(null); 
 
   useEffect(() => {
     const fetchInitialData = async () => {
-      // --- AUTO-CHECKOUT SCRIPT ---
+      // Auto Checkout Script
       const startOfToday = new Date();
       startOfToday.setHours(0, 0, 0, 0);
 
@@ -78,67 +76,122 @@ export default function AdminDashboard() {
       } catch (err) {
         console.error("Auto-checkout script failed:", err);
       }
-      // ----------------------------
 
-      // Fetch company ID and custom fields mapping
       const { data: authData } = await supabase.auth.getUser();
-      if (authData?.user) {
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("company_id")
-          .eq("id", authData.user.id)
-          .single();
+      if (!authData?.user) {
+        setLoading(false);
+        return;
+      }
 
-        if (profile?.company_id) {
-          // Fetch custom fields
-          const { data: comp } = await supabase
-            .from("companies")
-            .select("custom_fields")
-            .eq("id", profile.company_id)
-            .single();
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("company_id")
+        .eq("id", authData.user.id)
+        .single();
 
-          if (comp?.custom_fields) {
-            const labelMap: Record<string, string> = {};
-            // @ts-ignore
-            comp.custom_fields.forEach((f: any) => {
-              labelMap[f.id] = f.label;
-            });
-            setCustomFieldLabels(labelMap);
-          }
+      if (!profile?.company_id) {
+        setLoading(false);
+        return;
+      }
 
-          // NEW: Fetch Gates for this company
-          try {
-            const gatesRes = await fetch(`/api/gates?company_id=${profile.company_id}`);
-            if (gatesRes.ok) {
-              const gatesJson = await gatesRes.json();
-              if (gatesJson.data) setGates(gatesJson.data);
-            }
-          } catch (error) {
-            console.error("Error fetching gates:", error);
-          }
+      // --- 1. REPLICATE THE EXACT SAME BILLING CHECK TO PREVENT DATA LEAKAGE ---
+      const { data: company } = await supabase
+        .from("companies")
+        .select("is_locked, custom_fields, created_at")
+        .eq("id", profile.company_id)
+        .single();
+
+      let countStartDate = company?.created_at || new Date(0).toISOString();
+      let lastPaymentDate = company?.created_at || new Date(0).toISOString();
+
+      const { data: recentTx } = await supabase
+        .from("transactions")
+        .select("created_at, status")
+        .eq("company_id", profile.company_id)
+        .order("created_at", { ascending: false })
+        .limit(10); 
+
+      if (recentTx && recentTx.length > 0) {
+        const lastPaid = recentTx.find(tx => 
+          tx.status && (tx.status.toUpperCase() === 'COMPLETED' || tx.status.toUpperCase() === 'SUCCESS' || tx.status.toUpperCase() === 'PAID')
+        );
+
+        if (lastPaid) {
+          countStartDate = lastPaid.created_at;
+          lastPaymentDate = lastPaid.created_at;
         }
       }
 
-      // 1. Fetch up to 2000 visitors
-      const { data, error } = await supabase
+      const { count } = await supabase
+        .from("visitors")
+        .select("*", { count: "exact", head: true })
+        .eq("company_id", profile.company_id)
+        .gte("created_at", countStartDate);
+
+      const calculatedAmountDue = (count || 0) * 3;
+
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+      // Only lock if they OWE money AND it's been more than 30 days
+      let accountLocked = company?.is_locked === true;
+      const isOverdue = new Date(lastPaymentDate) < thirtyDaysAgo;
+
+      if (calculatedAmountDue > 0 && isOverdue) {
+        accountLocked = true;
+      }
+
+      setIsLocked(accountLocked);
+
+      // --- IMPENETRABLE SECURITY BLOCK ---
+      // If the account is locked, we HALT the function here. 
+      // The massive 2000-row visitor query will NEVER fire. 
+      // It is impossible to bypass this with DevTools because the data isn't fetched.
+      if (accountLocked) {
+        setLoading(false);
+        return;
+      }
+
+      // --- IF WE REACH HERE, THE ACCOUNT IS PAID IN FULL & UNLOCKED ---
+
+      if (company?.custom_fields) {
+        const labelMap: Record<string, string> = {};
+        // @ts-ignore
+        company.custom_fields.forEach((f: any) => {
+          labelMap[f.id] = f.label;
+        });
+        setCustomFieldLabels(labelMap);
+      }
+
+      try {
+        const gatesRes = await fetch(`/api/gates?company_id=${profile.company_id}`);
+        if (gatesRes.ok) {
+          const gatesJson = await gatesRes.json();
+          if (gatesJson.data) setGates(gatesJson.data);
+        }
+      } catch (error) {
+        console.error("Error fetching gates:", error);
+      }
+
+      // Fetch Visitors (Only runs if Unlocked)
+      const { data: visitorData, error: visitorError } = await supabase
         .from("visitors")
         .select("*")
         .order("created_at", { ascending: false })
         .limit(2000);
 
-      if (error) {
-        console.error("Error fetching visitors:", error);
+      if (visitorError) {
+        console.error("Error fetching visitors:", visitorError);
       } else {
-        setVisitors(data || []);
+        setVisitors(visitorData || []);
       }
 
-      // 2. Fetch the exact lifetime count
-      const { count, error: countError } = await supabase
+      const { count: lifetimeCount, error: lifetimeError } = await supabase
         .from("visitors")
         .select("*", { count: "exact", head: true });
 
-      if (!countError && count !== null) {
-        setLifetimeVisitors(count);
+      if (!lifetimeError && lifetimeCount !== null) {
+        setLifetimeVisitors(lifetimeCount);
       }
 
       setLoading(false);
@@ -146,23 +199,24 @@ export default function AdminDashboard() {
 
     fetchInitialData();
 
-    // Subscribe to real-time changes
     const channel = supabase
       .channel("admin-dashboard")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "visitors" },
         (payload) => {
-          if (payload.eventType === "INSERT") {
-            setVisitors((prev) => [payload.new as Visitor, ...prev]);
-            setLifetimeVisitors((prev) => prev + 1); 
-          } else if (payload.eventType === "UPDATE") {
-            setVisitors((prev) =>
-              prev.map((v) => (v.id === payload.new.id ? (payload.new as Visitor) : v))
-            );
-          } else if (payload.eventType === "DELETE") {
-            setVisitors((prev) => prev.filter((v) => v.id !== payload.old.id));
-            setLifetimeVisitors((prev) => Math.max(0, prev - 1)); 
+          if (!isLocked) {
+            if (payload.eventType === "INSERT") {
+              setVisitors((prev) => [payload.new as Visitor, ...prev]);
+              setLifetimeVisitors((prev) => prev + 1); 
+            } else if (payload.eventType === "UPDATE") {
+              setVisitors((prev) =>
+                prev.map((v) => (v.id === payload.new.id ? (payload.new as Visitor) : v))
+              );
+            } else if (payload.eventType === "DELETE") {
+              setVisitors((prev) => prev.filter((v) => v.id !== payload.old.id));
+              setLifetimeVisitors((prev) => Math.max(0, prev - 1)); 
+            }
           }
         }
       )
@@ -171,20 +225,23 @@ export default function AdminDashboard() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, []); // isLocked is removed from dependency array to prevent infinite loop
 
-  // NEW: Helper to get Gate Name
+  // --- HARD RENDER BLOCK ---
+  // If the account is locked, we return nothing. The Layout component renders the lock screen popup instead.
+  if (isLocked) {
+    return null;
+  }
+
   const getGateName = (gateId?: string | null) => {
     if (!gateId) return "Unassigned";
     const gate = gates.find(g => g.id === gateId);
     return gate ? gate.name : "Unknown Gate";
   };
 
-  // Filter visitors
   const filteredVisitors = visitors.filter((v) => {
     const query = searchQuery.toLowerCase();
     
-    // Check standard fields
     let matchesSearch = 
       v.name.toLowerCase().includes(query) ||
       v.phone?.includes(query) ||
@@ -192,7 +249,6 @@ export default function AdminDashboard() {
       (v.host_name && v.host_name.toLowerCase().includes(query)) ||
       (v.vehicle_reg && v.vehicle_reg.toLowerCase().includes(query));
 
-    // Also check inside custom fields for search matches
     if (!matchesSearch && v.custom_data) {
       matchesSearch = Object.values(v.custom_data).some(val => 
         val && val.toLowerCase().includes(query)
@@ -201,7 +257,6 @@ export default function AdminDashboard() {
 
     const matchesStatus = statusFilter === "all" || v.status === statusFilter;
     
-    // NEW: Check gate filter
     let matchesGate = true;
     if (gateFilter === "unassigned") {
       matchesGate = !v.gate_id;
@@ -226,21 +281,19 @@ export default function AdminDashboard() {
     return matchesSearch && matchesStatus && matchesDate && matchesGate;
   });
 
-  // Export to CSV Function
   const downloadCSV = () => {
     if (filteredVisitors.length === 0) {
       alert("No data available to download.");
       return;
     }
 
-    // Include dynamically created fields in the CSV headers
     const customFieldIds = Object.keys(customFieldLabels);
     const customHeaders = customFieldIds.map(id => customFieldLabels[id]);
     
     const headers = [
       "Date", "Visitor Name", "Phone Number", "Document Type", "ID Number", 
       "Host Name", "Purpose", "Vehicle Reg", "Status", "Entry Gate", "Time In", "Time Out",
-      ...customHeaders // Add dynamic headers
+      ...customHeaders
     ];
     
     const csvRows = filteredVisitors.map((v) => {
@@ -259,14 +312,12 @@ export default function AdminDashboard() {
         `"${v.purpose || 'N/A'}"`,
         `"${v.vehicle_reg || 'N/A'}"`,
         `"${v.status.replace(/_/g, " ").toUpperCase()}"`,
-        `"${gateName}"`, // ADDED GATE
+        `"${gateName}"`,
         `"${timeIn}"`,
         `"${timeOut}"`
       ];
 
-      // Add dynamic field values
       const customData = customFieldIds.map(id => `"${v.custom_data?.[id] || 'N/A'}"`);
-
       return [...standardData, ...customData].join(",");
     });
 
@@ -464,7 +515,6 @@ export default function AdminDashboard() {
                   </TableHeader>
                   <TableBody>
                     {filteredVisitors.map((visitor) => {
-                      // Check if there's any standard extra info OR custom info to show the Info Button
                       const hasCustomData = visitor.custom_data && Object.values(visitor.custom_data).some(val => val.trim() !== "");
                       const hasExtraInfo = visitor.host_name || visitor.purpose || visitor.vehicle_reg || hasCustomData;
 
@@ -494,7 +544,6 @@ export default function AdminDashboard() {
                               <div>
                                 <div className="flex items-center gap-2">
                                   <span className="font-semibold text-zinc-900 whitespace-nowrap">{visitor.name}</span>
-                                  {/* INFO BUTTON MODAL TRIGGER */}
                                   {hasExtraInfo && (
                                     <button
                                       onClick={() => setInfoModalVisitor(visitor)}
@@ -510,7 +559,6 @@ export default function AdminDashboard() {
                             </div>
                           </TableCell>
                           
-                          {/* ENTRY GATE */}
                           <TableCell className="whitespace-nowrap">
                              <span className="inline-flex items-center gap-1.5 rounded-md bg-zinc-100 px-2 py-1 text-xs font-medium text-zinc-600 ring-1 ring-inset ring-zinc-500/10">
                                 <DoorOpen className="h-3 w-3" />

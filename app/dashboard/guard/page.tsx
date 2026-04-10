@@ -66,6 +66,9 @@ export default function GuardDashboard() {
   const [askPurpose, setAskPurpose] = useState<boolean>(false);
   const [askVehicle, setAskVehicle] = useState<boolean>(false);
 
+  // NEW: State for checking if the account is locked
+  const [isLocked, setIsLocked] = useState<boolean>(false);
+
   // OTP & Request States
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
   const [sendingOtpId, setSendingOtpId] = useState<string | null>(null); 
@@ -121,7 +124,7 @@ export default function GuardDashboard() {
       // 3. Fetch company rules & custom fields mapping
       const { data: companyData } = await supabase
         .from("companies")
-        .select("require_photo, ask_phone, ask_id, ask_host, ask_purpose, ask_vehicle, custom_fields")
+        .select("require_photo, ask_phone, ask_id, ask_host, ask_purpose, ask_vehicle, custom_fields, is_locked, subscription_ends_at")
         .eq("id", currentCompanyId)
         .single();
         
@@ -132,6 +135,10 @@ export default function GuardDashboard() {
         setAskHost(companyData.ask_host || false);
         setAskPurpose(companyData.ask_purpose || false);
         setAskVehicle(companyData.ask_vehicle || false);
+
+        // CHECK LOCK STATUS
+        const isExpired = companyData.subscription_ends_at ? new Date(companyData.subscription_ends_at) < new Date() : false;
+        setIsLocked(companyData.is_locked || isExpired);
 
         if (companyData.custom_fields) {
           const labelMap: Record<string, string> = {};
@@ -365,42 +372,44 @@ export default function GuardDashboard() {
           </div>
         </div>
 
-        {/* Dashboard Stats */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-          <Card className="bg-white/90 backdrop-blur-sm border-zinc-200/60 shadow-sm">
-            <CardContent className="p-6 flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-zinc-500">Total Today</p>
-                <h3 className="text-3xl font-bold text-zinc-900 mt-1">{totalToday}</h3>
-              </div>
-              <div className="p-3 bg-zinc-100/80 text-zinc-600 rounded-full">
-                <UserPlus className="w-6 h-6" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="bg-white/90 backdrop-blur-sm border-zinc-200/60 shadow-sm">
-            <CardContent className="p-6 flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-zinc-500">Pending</p>
-                <h3 className="text-3xl font-bold text-zinc-900 mt-1">{pendingCount}</h3>
-              </div>
-              <div className="p-3 bg-amber-100/80 text-amber-600 rounded-full">
-                <Clock className="w-6 h-6" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="bg-white/90 backdrop-blur-sm border-zinc-200/60 shadow-sm">
-            <CardContent className="p-6 flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-zinc-500">Checked In</p>
-                <h3 className="text-3xl font-bold text-zinc-900 mt-1">{checkedInCount}</h3>
-              </div>
-              <div className="p-3 bg-green-100/80 text-green-600 rounded-full">
-                <CheckCircle2 className="w-6 h-6" />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+        {/* Dashboard Stats - HIDDEN IF LOCKED */}
+        {!isLocked && (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+            <Card className="bg-white/90 backdrop-blur-sm border-zinc-200/60 shadow-sm">
+              <CardContent className="p-6 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-zinc-500">Total Today</p>
+                  <h3 className="text-3xl font-bold text-zinc-900 mt-1">{totalToday}</h3>
+                </div>
+                <div className="p-3 bg-zinc-100/80 text-zinc-600 rounded-full">
+                  <UserPlus className="w-6 h-6" />
+                </div>
+              </CardContent>
+            </Card>
+            <Card className="bg-white/90 backdrop-blur-sm border-zinc-200/60 shadow-sm">
+              <CardContent className="p-6 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-zinc-500">Pending</p>
+                  <h3 className="text-3xl font-bold text-zinc-900 mt-1">{pendingCount}</h3>
+                </div>
+                <div className="p-3 bg-amber-100/80 text-amber-600 rounded-full">
+                  <Clock className="w-6 h-6" />
+                </div>
+              </CardContent>
+            </Card>
+            <Card className="bg-white/90 backdrop-blur-sm border-zinc-200/60 shadow-sm">
+              <CardContent className="p-6 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-zinc-500">Checked In</p>
+                  <h3 className="text-3xl font-bold text-zinc-900 mt-1">{checkedInCount}</h3>
+                </div>
+                <div className="p-3 bg-green-100/80 text-green-600 rounded-full">
+                  <CheckCircle2 className="w-6 h-6" />
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
 
         {/* Live Visitor Table */}
         <Card className="bg-white/90 backdrop-blur-sm border-zinc-200/60 shadow-sm">

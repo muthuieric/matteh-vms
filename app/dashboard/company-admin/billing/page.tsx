@@ -3,301 +3,324 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"; 
-import { CreditCard, Loader2, CheckCircle2, AlertCircle, ArrowLeft, Calendar, Receipt, Users } from "lucide-react";
+import { CreditCard, Loader2, CheckCircle2, Clock, XCircle, Receipt, Calendar, ArrowRight, Activity, ShieldCheck } from "lucide-react";
+
+type Transaction = {
+  id: string;
+  created_at: string;
+  amount: number;
+  tracking_id: string;
+  status: string;
+};
 
 export default function BillingPage() {
+  const [loading, setLoading] = useState(true);
   const [companyId, setCompanyId] = useState<string | null>(null);
-  const [isPaying, setIsPaying] = useState(false);
-  const [subscriptionStatus, setSubscriptionStatus] = useState<string>("Loading...");
-  const [subscriptionEndsAt, setSubscriptionEndsAt] = useState<string | null>(null);
-  const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
-  const [transactions, setTransactions] = useState<any[]>([]); 
-  const [visitorCount, setVisitorCount] = useState<number>(0);
   
-  const [isInitializing, setIsInitializing] = useState(true);
-  const [profileError, setProfileError] = useState<string | null>(null);
-
-  // This is purely visual for the UI. 
-  // The actual charge is strictly handled and protected on the server side.
-  const RATE_PER_VISITOR = 3; 
+  // Synchronized Billing States
+  const [visitorCount, setVisitorCount] = useState(0);
+  const [amountDue, setAmountDue] = useState(0);
+  const [periodStart, setPeriodStart] = useState<Date | null>(null);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [isPaying, setIsPaying] = useState(false);
 
   useEffect(() => {
     const fetchBillingData = async () => {
-      setIsInitializing(true);
-      setProfileError(null);
+      const { data: authData } = await supabase.auth.getUser();
+      if (!authData?.user) return;
 
-      try {
-        const { data: authData, error: authError } = await supabase.auth.getUser();
-        if (authError) throw authError;
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("company_id")
+        .eq("id", authData.user.id)
+        .single();
 
-        if (authData?.user) {
-          const { data: profile, error: dbError } = await supabase
-            .from("profiles")
-            .select("company_id")
-            .eq("id", authData.user.id)
-            .single();
+      if (profile?.company_id) {
+        setCompanyId(profile.company_id);
 
-          if (dbError) throw new Error(`Database Error: ${dbError.message}`);
-          if (!profile?.company_id) throw new Error("Your account profile exists, but it has no 'company_id' assigned to it.");
+        // 1. Fetch All Transactions for History Table
+        const { data: txData } = await supabase
+          .from("transactions")
+          .select("*")
+          .eq("company_id", profile.company_id)
+          .order("created_at", { ascending: false });
 
-          setCompanyId(profile.company_id);
-          
-          // 1. Fetch Company Status
-          const { data: company, error: compError } = await supabase
-            .from("companies")
-            .select("subscription_status, subscription_ends_at")
-            .eq("id", profile.company_id)
-            .single();
-            
-          if (compError) throw compError;
+        setTransactions(txData || []);
 
-          if (company) {
-            setSubscriptionStatus(company.subscription_status || "trial");
-            setSubscriptionEndsAt(company.subscription_ends_at);
+        // 2. SYNCHRONIZED CALCULATION LOGIC
+        const { data: company } = await supabase.from("companies").select("created_at").eq("id", profile.company_id).single();
+        let countStartDate = company?.created_at || new Date(0).toISOString();
+        let displayStartDate = new Date(countStartDate);
+
+        if (txData && txData.length > 0) {
+          // Find the latest successful payment
+          const lastPaid = txData.find(tx => 
+            tx.status && (tx.status.toUpperCase() === 'COMPLETED' || tx.status.toUpperCase() === 'SUCCESS' || tx.status.toUpperCase() === 'PAID')
+          );
+
+          if (lastPaid) {
+            countStartDate = lastPaid.created_at;
+            displayStartDate = new Date(lastPaid.created_at);
           }
-
-          // 2. Fetch Visitor Count for the last 30 days
-          const thirtyDaysAgo = new Date();
-          thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-
-          const { count, error: countError } = await supabase
-            .from("visitors")
-            .select("*", { count: "exact", head: true })
-            .eq("company_id", profile.company_id)
-            .gte("created_at", thirtyDaysAgo.toISOString());
-
-          if (countError) console.error("Error fetching visitor count:", countError);
-          setVisitorCount(count || 0);
-
-          // 3. Fetch Transaction History
-          const { data: txData } = await supabase
-            .from("transactions")
-            .select("*")
-            .eq("company_id", profile.company_id)
-            .order("created_at", { ascending: false });
-
-          if (txData) setTransactions(txData);
         }
-      } catch (error: any) {
-        console.error("Initialization failed:", error);
-        setProfileError(error.message || "An unknown error occurred loading your profile.");
-      } finally {
-        setIsInitializing(false);
+        
+        setPeriodStart(displayStartDate);
+
+        // 3. Count UNPAID visitors since the calculated reset date
+        const { count } = await supabase
+          .from("visitors")
+          .select("*", { count: "exact", head: true })
+          .eq("company_id", profile.company_id)
+          .gte("created_at", countStartDate);
+
+        const unpaidVisitors = count || 0;
+        setVisitorCount(unpaidVisitors);
+        
+        // 4. Calculate Total Due
+        setAmountDue(unpaidVisitors * 3); // 3 KES per visitor
       }
+      setLoading(false);
     };
-    
+
     fetchBillingData();
   }, []);
-
-  const totalDue = Math.max(visitorCount * RATE_PER_VISITOR, 10); 
 
   const handlePayment = async () => {
     if (!companyId) return;
     setIsPaying(true);
 
     try {
+      // NOTE ON SECURITY: 
+      // Passing the amount from the frontend can be manipulated in DevTools. 
+      // Your backend (/api/payments/pesapal/initiate) MUST replicate the visitor * 3 calculation 
+      // securely and ignore the amount passed here to guarantee zero financial loss.
       const response = await fetch("/api/payments/pesapal/initiate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // We only send the companyId. The server calculates the cost to prevent hacking.
-        body: JSON.stringify({ companyId }), 
+        body: JSON.stringify({ companyId, amount: amountDue }), 
       });
 
       const data = await response.json();
-
       if (data.redirect_url) {
-        setPaymentUrl(data.redirect_url);
+        window.location.href = data.redirect_url;
       } else {
-        console.error("Backend Error:", data);
-        alert(`Payment initialization failed: ${data.error || "Unknown error"}.`);
+        alert("Payment initialization failed.");
       }
     } catch (error) {
-      console.error("Fetch Error:", error);
-      alert("An error occurred starting the payment. Please check your network connection.");
+      console.error(error);
+      alert("An error occurred starting the payment.");
     } finally {
       setIsPaying(false);
     }
   };
 
-  if (paymentUrl) {
-    return (
-      <div className="min-h-screen bg-zinc-50 p-4 md:p-6">
-        <div className="max-w-4xl mx-auto space-y-4">
-          <Button variant="outline" onClick={() => setPaymentUrl(null)} className="mb-2 bg-white text-zinc-700">
-            <ArrowLeft className="mr-2 h-4 w-4" /> Cancel Checkout
-          </Button>
-          <Card className="shadow-xl overflow-hidden border-t-4 border-t-amber-600 p-0 rounded-xl">
-            <iframe src={paymentUrl} className="w-full h-[80vh] min-h-[600px] border-0 bg-white" title="Pesapal Secure Checkout" />
-          </Card>
-        </div>
-      </div>
-    );
-  }
+  const formatDate = (date: Date | string) => {
+    return new Intl.DateTimeFormat('en-GB', {
+      day: 'numeric', month: 'short', year: 'numeric'
+    }).format(new Date(date));
+  };
 
-  const isExpired = subscriptionEndsAt ? new Date(subscriptionEndsAt) < new Date() : false;
+  const formatDateTime = (date: Date | string) => {
+    return new Intl.DateTimeFormat('en-GB', {
+      day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+    }).format(new Date(date));
+  };
 
   return (
-    <div className="min-h-screen bg-zinc-50 p-4 md:p-6">
-      <div className="max-w-6xl mx-auto space-y-6 md:space-y-8">
+    <div className="min-h-screen bg-zinc-50 p-4 md:p-8">
+      <div className="max-w-6xl mx-auto space-y-8">
         
-        <div className="border-b border-zinc-200 pb-4">
-          <h1 className="text-2xl md:text-3xl font-bold text-zinc-900">Billing & Usage</h1>
-          <p className="text-zinc-500 mt-1 text-sm md:text-base">Pay for your visitor volume to keep your account active.</p>
+        {/* Header Section */}
+        <div className="flex flex-col md:flex-row md:items-end justify-between border-b border-zinc-200 pb-5 gap-4">
+          <div>
+            <h1 className="text-3xl font-extrabold text-zinc-900 tracking-tight">Billing & Wallet</h1>
+            <p className="text-zinc-500 mt-1.5 text-base">Manage your usage, view outstanding balances, and transaction history.</p>
+          </div>
+          <div className="flex items-center gap-2 text-sm font-medium text-green-700 bg-green-50 px-3 py-1.5 rounded-full border border-green-200">
+            <ShieldCheck className="w-4 h-4" /> Secure SSL Connection
+          </div>
         </div>
 
-        {profileError && (
-          <div className="bg-red-50 text-red-700 p-4 rounded-xl border border-red-200 font-medium flex items-start gap-3 shadow-sm">
-            <AlertCircle className="w-5 h-5 mt-0.5 shrink-0" />
-            <div>
-              <p className="font-bold">Could not load your company profile:</p>
-              <p className="text-sm mt-1 text-red-600">{profileError}</p>
+        {loading ? (
+          // SKELETON LOADER UI
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 animate-pulse">
+            <div className="lg:col-span-1 space-y-4">
+              <div className="h-64 bg-zinc-200 rounded-xl w-full"></div>
+            </div>
+            <div className="lg:col-span-2 space-y-4">
+              <div className="h-12 bg-zinc-200 rounded-xl w-full"></div>
+              <div className="h-96 bg-zinc-200 rounded-xl w-full"></div>
             </div>
           </div>
-        )}
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
-          <Card className="shadow-sm border-zinc-200">
-            <CardHeader className="pb-4">
-              <CardTitle>Current Status</CardTitle>
-              <CardDescription>Your organization's account standing</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="flex items-center space-x-4 bg-white p-4 rounded-xl border border-zinc-100 shadow-sm">
-                <div className={`p-3 rounded-full shrink-0 ${
-                  isExpired ? 'bg-red-100 text-red-600' :
-                  subscriptionStatus === 'trial' ? 'bg-amber-100 text-amber-600' : 
-                  'bg-green-100 text-green-600'
-                }`}>
-                  {isInitializing ? <Loader2 className="w-6 h-6 animate-spin" /> : !isExpired ? <CheckCircle2 size={24} /> : <AlertCircle size={24} />}
-                </div>
-                <div>
-                  <h3 className="text-lg md:text-xl font-bold uppercase tracking-wide text-zinc-900">
-                    {isInitializing ? 'Loading...' : isExpired ? 'Unpaid / Locked' : subscriptionStatus === 'trial' ? 'Trial Period' : 'Active'}
-                  </h3>
-                  <p className="text-sm text-zinc-500 mt-0.5">
-                    {isInitializing ? 'Fetching status...' : !isExpired ? 'Account is currently fully operational.' : 'Please pay your balance to unlock.'}
-                  </p>
-                </div>
-              </div>
-
-              <div className="pt-2 flex items-center gap-3 px-2">
-                <Calendar className="text-zinc-400 w-5 h-5 shrink-0" />
-                <div>
-                  <p className="text-sm font-medium text-zinc-500">Valid Until:</p>
-                  <p className={`text-lg font-bold ${isExpired ? 'text-red-600' : 'text-zinc-900'}`}>
-                    {isInitializing ? '...' : subscriptionEndsAt 
-                      ? new Date(subscriptionEndsAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) 
-                      : "No active subscription"}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="shadow-sm border-0 border-t-4 border-t-amber-500 bg-white">
-            <CardHeader className="pb-4">
-              <CardTitle>Clear Usage Balance</CardTitle>
-              <CardDescription>Based on visitors over the last 30 days</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              
-              <div className="space-y-3">
-                <div className="flex justify-between items-center text-sm">
-                  <span className="text-zinc-600 flex items-center gap-2"><Users className="w-4 h-4"/> Visitor Count (30 Days)</span>
-                  <span className="font-bold text-zinc-900 text-lg">{visitorCount}</span>
-                </div>
-                <div className="flex justify-between items-center text-sm border-b pb-3 border-zinc-100">
-                  <span className="text-zinc-600">Rate per Visitor</span>
-                  <span className="font-bold text-zinc-900">KES {RATE_PER_VISITOR}</span>
-                </div>
-              </div>
-
-              <div className="bg-zinc-50 p-4 rounded-xl border border-zinc-200 flex justify-between items-center shadow-inner">
-                <span className="font-semibold text-zinc-600 uppercase tracking-wider text-xs md:text-sm">Total Due</span>
-                <span className="font-black text-xl md:text-2xl text-zinc-900 tracking-tight">KES {totalDue.toLocaleString()}</span>
-              </div>
-              
-              <Button 
-                onClick={handlePayment} 
-                disabled={isPaying || isInitializing || !companyId} 
-                className="w-full h-14 md:h-12 text-base md:text-lg font-bold bg-amber-500 hover:bg-amber-600 text-zinc-900 shadow-md transition-all active:scale-[0.98]"
-              >
-                {isInitializing ? (
-                  <><Loader2 className="w-5 h-5 mr-2 animate-spin" /> Verifying...</>
-                ) : isPaying ? (
-                  <><Loader2 className="w-5 h-5 mr-2 animate-spin" /> Generating Checkout...</>
-                ) : (
-                  <><CreditCard className="w-5 h-5 mr-2" /> Pay KES {totalDue.toLocaleString()} to Unlock</>
-                )}
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="pt-4 space-y-4">
-          <div className="flex items-center gap-2 px-1">
-            <Receipt className="w-5 h-5 text-zinc-500" />
-            <h2 className="text-xl font-bold text-zinc-900">Transaction History</h2>
-          </div>
-          
-          <Card className="shadow-sm border-zinc-200">
-            <CardContent className="p-0 sm:p-4 sm:pt-4">
-              <div className="rounded-none sm:rounded-md border-y sm:border border-zinc-200 overflow-x-auto">
-                <Table>
-                  <TableHeader className="bg-zinc-50">
-                    <TableRow>
-                      <TableHead className="pl-4 sm:pl-6 py-3 whitespace-nowrap">Date</TableHead>
-                      <TableHead className="whitespace-nowrap">Amount (KES)</TableHead>
-                      <TableHead className="whitespace-nowrap">Tracking ID</TableHead>
-                      <TableHead className="pr-4 sm:pr-6 whitespace-nowrap">Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {isInitializing ? (
-                      <TableRow>
-                        <TableCell colSpan={4} className="text-center py-10 text-zinc-500">
-                          <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-amber-500" /> Loading history...
-                        </TableCell>
-                      </TableRow>
-                    ) : transactions.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={4} className="text-center py-10 text-zinc-500">
-                          <div className="bg-zinc-100 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3">
-                            <Receipt className="w-6 h-6 text-zinc-400" />
-                          </div>
-                          <p className="font-semibold text-zinc-900">No transactions found.</p>
-                          <p className="text-sm mt-1">You haven't made any payments yet.</p>
-                        </TableCell>
-                      </TableRow>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            
+            {/* CURRENT OUTSTANDING BALANCE CARD */}
+            <div className="lg:col-span-1 space-y-6">
+              <Card className="shadow-lg border-0 ring-1 ring-zinc-200 h-fit overflow-hidden">
+                <div className={`h-1.5 w-full ${amountDue > 0 ? "bg-amber-500" : "bg-green-500"}`} />
+                <CardHeader className="pb-4 bg-zinc-50/80 border-b border-zinc-100">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="flex items-center gap-2 text-lg">
+                      <Receipt className="w-5 h-5 text-zinc-600" /> 
+                      Current Statement
+                    </CardTitle>
+                    {amountDue > 0 ? (
+                      <span className="flex items-center gap-1.5 text-xs font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+                        <Activity className="w-3.5 h-3.5" /> Due
+                      </span>
                     ) : (
-                      transactions.map((tx) => (
-                        <TableRow key={tx.id} className="hover:bg-zinc-50 transition-colors">
-                          <TableCell className="pl-4 sm:pl-6 font-medium text-zinc-900 whitespace-nowrap">
-                            {new Date(tx.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                          </TableCell>
-                          <TableCell className="font-bold text-emerald-600 whitespace-nowrap">
-                            {tx.amount.toLocaleString()}
-                          </TableCell>
-                          <TableCell className="text-xs text-zinc-500 font-mono whitespace-nowrap">
-                            {tx.tracking_id}
-                          </TableCell>
-                          <TableCell className="pr-4 sm:pr-6 whitespace-nowrap">
-                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                              {tx.status}
-                            </span>
-                          </TableCell>
-                        </TableRow>
-                      ))
+                      <span className="flex items-center gap-1.5 text-xs font-bold text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
+                        <CheckCircle2 className="w-3.5 h-3.5" /> Settled
+                      </span>
                     )}
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="pt-6 space-y-6 bg-white">
+                  
+                  {/* Billing Period Indicator */}
+                  <div className="bg-zinc-50 rounded-lg p-3 border border-zinc-100 flex items-center justify-between text-sm">
+                    <div className="flex items-center gap-2 text-zinc-600">
+                      <Calendar className="w-4 h-4" />
+                      <span className="font-medium">Period Start</span>
+                    </div>
+                    <span className="font-semibold text-zinc-900">
+                      {periodStart ? formatDate(periodStart) : "N/A"}
+                    </span>
+                  </div>
 
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-zinc-500 font-medium">Unpaid Visitors</span>
+                      <span className="text-zinc-900 font-bold text-base">{visitorCount}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-zinc-500 font-medium">Rate per Visitor</span>
+                      <span className="text-zinc-900 font-bold text-base">KES 3.00</span>
+                    </div>
+                    
+                    <div className="pt-4 border-t border-dashed border-zinc-200">
+                      <div className="flex justify-between items-end">
+                        <span className="text-zinc-900 font-bold">Total Due</span>
+                        <span className={`text-3xl font-black tracking-tight ${amountDue > 0 ? "text-amber-600" : "text-green-600"}`}>
+                          KES {amountDue.toLocaleString()}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <Button 
+                    onClick={handlePayment} 
+                    disabled={isPaying || amountDue <= 0} 
+                    className={`w-full font-bold h-12 shadow-md transition-all active:scale-[0.98] ${
+                      amountDue > 0 
+                        ? "bg-zinc-900 hover:bg-zinc-800 text-white" 
+                        : "bg-zinc-100 text-zinc-400 cursor-not-allowed"
+                    }`}
+                  >
+                    {isPaying ? (
+                      <><Loader2 className="w-5 h-5 mr-2 animate-spin" /> Processing Securely...</>
+                    ) : amountDue <= 0 ? (
+                      <><CheckCircle2 className="w-5 h-5 mr-2" /> Account Settled</>
+                    ) : (
+                      <><CreditCard className="w-5 h-5 mr-2" /> Pay KES {amountDue.toLocaleString()}</>
+                    )}
+                  </Button>
+                  
+                  {amountDue <= 0 && (
+                    <div className="text-center">
+                      <p className="text-sm text-green-600 font-semibold mt-2">
+                        Your account is fully active!
+                      </p>
+                      <p className="text-xs text-zinc-500 mt-1">
+                        No action required until new visitors arrive.
+                      </p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* TRANSACTION HISTORY TABLE */}
+            <div className="lg:col-span-2">
+              <Card className="shadow-lg border-0 ring-1 ring-zinc-200">
+                <CardHeader className="border-b border-zinc-100 bg-zinc-50/50 pb-5">
+                  <CardTitle className="text-lg">Payment History</CardTitle>
+                  <CardDescription>A complete chronological log of your past top-ups and settlements.</CardDescription>
+                </CardHeader>
+                <CardContent className="p-0">
+                  {transactions.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-16 text-center px-4">
+                      <div className="w-16 h-16 bg-zinc-100 rounded-full flex items-center justify-center mb-4">
+                        <Receipt className="w-8 h-8 text-zinc-300" />
+                      </div>
+                      <h3 className="text-lg font-semibold text-zinc-900">No Transactions Yet</h3>
+                      <p className="text-sm text-zinc-500 max-w-sm mt-1">
+                        When you make your first payment for visitor check-ins, the receipt will appear here.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader className="bg-zinc-50/80">
+                          <TableRow className="border-zinc-200">
+                            <TableHead className="font-semibold text-zinc-600">Date & Time</TableHead>
+                            <TableHead className="font-semibold text-zinc-600">Reference ID</TableHead>
+                            <TableHead className="font-semibold text-zinc-600 text-right">Amount</TableHead>
+                            <TableHead className="font-semibold text-zinc-600 text-center">Status</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {transactions.map((tx) => {
+                            const statusUpper = tx.status?.toUpperCase() || "PENDING";
+                            let StatusIcon = Clock;
+                            let statusColor = "text-amber-700 bg-amber-50 ring-amber-200";
+
+                            if (statusUpper === "COMPLETED" || statusUpper === "SUCCESS" || statusUpper === "PAID") {
+                              StatusIcon = CheckCircle2;
+                              statusColor = "text-green-700 bg-green-50 ring-green-200";
+                            } else if (statusUpper === "FAILED" || statusUpper === "CANCELLED") {
+                              StatusIcon = XCircle;
+                              statusColor = "text-red-700 bg-red-50 ring-red-200";
+                            }
+
+                            return (
+                              <TableRow key={tx.id} className="hover:bg-zinc-50/80 transition-colors border-zinc-100">
+                                <TableCell className="whitespace-nowrap">
+                                  <div className="font-medium text-zinc-900">
+                                    {formatDate(tx.created_at)}
+                                  </div>
+                                  <div className="text-xs text-zinc-500 mt-0.5">
+                                    {new Date(tx.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="font-mono text-xs text-zinc-500">
+                                  {tx.tracking_id || "—"}
+                                </TableCell>
+                                <TableCell className="font-bold text-zinc-900 whitespace-nowrap text-right">
+                                  KES {Number(tx.amount || 0).toLocaleString()}
+                                </TableCell>
+                                <TableCell className="text-center">
+                                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider ring-1 ring-inset ${statusColor} whitespace-nowrap`}>
+                                    <StatusIcon className="w-3.5 h-3.5" />
+                                    {tx.status || "PENDING"}
+                                  </span>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+          </div>
+        )}
       </div>
     </div>
   );

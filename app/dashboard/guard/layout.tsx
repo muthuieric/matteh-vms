@@ -25,12 +25,17 @@ export default function GuardLayout({ children }: { children: React.ReactNode })
         if (profile?.company_id) {
           const { data: company } = await supabase
             .from("companies")
-            .select("is_locked")
+            .select("is_locked, subscription_ends_at")
             .eq("id", profile.company_id)
             .single();
 
-          if (company?.is_locked) {
-            setIsLocked(true);
+          if (company) {
+            const isExpired = company.subscription_ends_at 
+              ? new Date(company.subscription_ends_at) < new Date() 
+              : false; 
+            if (company.is_locked || isExpired) {
+              setIsLocked(true);
+            }
           }
         }
       }
@@ -53,20 +58,16 @@ export default function GuardLayout({ children }: { children: React.ReactNode })
     );
   }
 
-  // THE GUARD LOCKOUT SCREEN
+  // SOFT LOCKOUT: Show a banner but still render the system
   if (isLocked) {
     return (
-      <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center p-6 text-center">
-        <div className="bg-red-500/10 p-6 rounded-full mb-6">
-          <AlertOctagon className="w-16 h-16 text-red-500" />
+      <div className="flex flex-col h-screen overflow-hidden">
+        <div className="bg-red-600 text-white text-center py-2 text-sm font-semibold flex items-center justify-center gap-2 shrink-0 z-50">
+          <AlertOctagon className="w-4 h-4" /> System Unpaid - Limited Functionality. Please contact administration.
         </div>
-        <h1 className="text-4xl font-bold text-white mb-4">SYSTEM OFFLINE</h1>
-        <p className="text-xl text-zinc-400 max-w-md mb-8">
-          The Visitor Management System has been paused for your building. Please contact your Building Manager or Security Supervisor to restore access.
-        </p>
-        <Button size="lg" variant="outline" onClick={handleLogout} className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 hover:text-white">
-          <LogOut className="w-5 h-5 mr-2" /> Sign Out of Tablet
-        </Button>
+        <div className="flex-1 overflow-y-auto">
+          {children}
+        </div>
       </div>
     );
   }
