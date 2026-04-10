@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
@@ -15,7 +15,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { X, UserCircle, LogOut, Search, Clock, CheckCircle2, UserPlus, Info } from "lucide-react";
+import { X, UserCircle, LogOut, Search, Clock, CheckCircle2, UserPlus, Info, DoorOpen, QrCode, Printer } from "lucide-react";
 
 // Import the modal component for manual registration
 import AddVisitorModal from "@/components/AddVisitorModal";
@@ -36,6 +36,7 @@ type Visitor = {
   purpose?: string;
   vehicle_reg?: string;
   custom_data?: Record<string, string>; // Holds dynamic form answers
+  gate_id?: string | null; // NEW: Added gate_id to track entry point
 };
 
 export default function GuardDashboard() {
@@ -46,6 +47,10 @@ export default function GuardDashboard() {
   // State to securely hold the logged-in guard's assigned building/company
   const [companyId, setCompanyId] = useState<string | null>(null);
   
+  // NEW: State to hold the guard's specific assigned gate
+  const [guardGateId, setGuardGateId] = useState<string | null>(null);
+  const [guardGateName, setGuardGateName] = useState<string>("All Gates");
+
   // State to hold our custom field mapping
   const [customFieldLabels, setCustomFieldLabels] = useState<Record<string, string>>({});
   
@@ -68,6 +73,7 @@ export default function GuardDashboard() {
 
   // Modals State
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showQrModal, setShowQrModal] = useState(false);
   const [enlargedPhoto, setEnlargedPhoto] = useState<string | null>(null);
   const [infoModalVisitor, setInfoModalVisitor] = useState<Visitor | null>(null);
   
@@ -82,10 +88,10 @@ export default function GuardDashboard() {
         return;
       }
 
-      // 2. Look up their assigned company_id in the profiles table
+      // 2. Look up their assigned company_id AND gate_id in the profiles table
       const { data: profileData, error: profileError } = await supabase
         .from("profiles")
-        .select("company_id")
+        .select("company_id, gate_id")
         .eq("id", authData.user.id)
         .single();
 
@@ -96,7 +102,21 @@ export default function GuardDashboard() {
       }
 
       const currentCompanyId = profileData.company_id;
+      const currentGateId = profileData.gate_id;
+      
       setCompanyId(currentCompanyId);
+      setGuardGateId(currentGateId);
+
+      // 2.5 Fetch the Gate Name if they are assigned to one
+      if (currentGateId) {
+        const { data: gateData } = await supabase
+          .from("gates")
+          .select("name")
+          .eq("id", currentGateId)
+          .single();
+          
+        if (gateData) setGuardGateName(gateData.name);
+      }
 
       // 3. Fetch company rules & custom fields mapping
       const { data: companyData } = await supabase
@@ -123,11 +143,11 @@ export default function GuardDashboard() {
         }
       }
 
-      // 4. Fetch ONLY the visitors for this specific guard's building
+      // 4. Fetch ONLY the visitors for this specific guard's building (AND specific gate if assigned)
       const startOfToday = new Date();
       startOfToday.setHours(0, 0, 0, 0);
 
-      const { data: visitorData, error: visitorError } = await supabase
+      let query = supabase
         .from("visitors")
         .select("*")
         .eq("company_id", currentCompanyId) 
@@ -135,39 +155,52 @@ export default function GuardDashboard() {
         .in("status", ["pending", "checked_in"])
         .order("created_at", { ascending: false });
 
+      // Apply Gate Filter if the guard is assigned to a specific gate
+      if (currentGateId) {
+        query = query.eq("gate_id", currentGateId);
+      }
+
+      const { data: visitorData, error: visitorError } = await query;
+
       if (!visitorError) {
         setVisitors(visitorData || []);
       }
       setLoading(false);
+
+      // Set up Real-time listener for instant updates
+      const channel = supabase
+        .channel("guard-dashboard")
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "visitors" },
+          (payload) => {
+            if (payload.eventType === "INSERT") {
+              const newVisitor = payload.new as Visitor;
+              // FILTER REALTIME INSERTS: Only show if unassigned OR if the gate_id matches
+              if (!currentGateId || newVisitor.gate_id === currentGateId) {
+                setVisitors((prev) => [newVisitor, ...prev]);
+              }
+            } else if (payload.eventType === "UPDATE") {
+              if (payload.new.status === "checked_out" || payload.new.status === "auto_checked_out") {
+                setVisitors((prev) => prev.filter((v) => v.id !== payload.new.id));
+              } else {
+                setVisitors((prev) =>
+                  prev.map((v) => (v.id === payload.new.id ? (payload.new as Visitor) : v))
+                );
+              }
+            } else if (payload.eventType === "DELETE") {
+              setVisitors((prev) => prev.filter((v) => v.id !== payload.old.id));
+            }
+          }
+        )
+        .subscribe();
+
+      // Clean up function inside the useEffect block to grab the correct channel scope
+      return () => { supabase.removeChannel(channel); };
     };
 
-    initializeDashboard();
-
-    // Set up Real-time listener for instant updates
-    const channel = supabase
-      .channel("guard-dashboard")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "visitors" },
-        (payload) => {
-          if (payload.eventType === "INSERT") {
-            setVisitors((prev) => [payload.new as Visitor, ...prev]);
-          } else if (payload.eventType === "UPDATE") {
-            if (payload.new.status === "checked_out" || payload.new.status === "auto_checked_out") {
-              setVisitors((prev) => prev.filter((v) => v.id !== payload.new.id));
-            } else {
-              setVisitors((prev) =>
-                prev.map((v) => (v.id === payload.new.id ? (payload.new as Visitor) : v))
-              );
-            }
-          } else if (payload.eventType === "DELETE") {
-            setVisitors((prev) => prev.filter((v) => v.id !== payload.old.id));
-          }
-        }
-      )
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
+    const cleanup = initializeDashboard();
+    return () => { cleanup.then(fn => fn && fn()); };
   }, []);
 
   const handleLogout = async () => {
@@ -197,7 +230,10 @@ export default function GuardDashboard() {
       await fetch("/api/sms", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: phone, message: `Your building entry code is: ${code}` }),
+        body: JSON.stringify({ 
+          phone: phone, 
+          message: `Your building entry code is: ${code}` 
+        }),
       });
     } catch (err) {
       console.error(err);
@@ -224,6 +260,43 @@ export default function GuardDashboard() {
       status: "checked_out", 
       checked_out_at: new Date().toISOString() 
     }).eq("id", id);
+  };
+
+  const handlePrintQr = () => {
+    const url = `${window.location.origin}/${companyId}/gate${guardGateId ? `?gateId=${guardGateId}` : ''}`;
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(url)}`;
+    
+    // Open a new window for printing
+    const printWindow = window.open('', '', 'width=800,height=800');
+    if (printWindow) {
+      printWindow.document.write(`
+        <html>
+          <head>
+            <title>Print Gate QR Code</title>
+            <style>
+              body { font-family: system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; color: #18181b; }
+              .container { text-align: center; border: 2px dashed #e4e4e7; padding: 40px; border-radius: 24px; max-width: 500px; }
+              h1 { margin-bottom: 8px; font-size: 36px; font-weight: 900; letter-spacing: -0.02em; }
+              p { color: #71717a; margin-bottom: 32px; font-size: 18px; font-weight: 500; }
+              img { width: 300px; height: 300px; display: block; margin: 0 auto; border-radius: 12px; }
+              .footer { margin-top: 32px; font-size: 16px; color: #a1a1aa; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
+              @media print {
+                .container { border: none; padding: 0; }
+              }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <h1>Scan to Check In</h1>
+              <p>Point your smartphone camera at this code to register your visit.</p>
+              <img src="${qrUrl}" onload="setTimeout(() => { window.print(); window.close(); }, 500);" />
+              <div class="footer">${guardGateName}</div>
+            </div>
+          </body>
+        </html>
+      `);
+      printWindow.document.close();
+    }
   };
 
   // --- UI Calculated Variables with Search & Status Filter ---
@@ -274,11 +347,17 @@ export default function GuardDashboard() {
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
             <h1 className="text-3xl font-bold text-zinc-900">Gate Dashboard</h1>
-            <p className="text-zinc-500">Live visitor monitoring and verification.</p>
+            <p className="text-zinc-500 flex items-center gap-1.5 mt-1">
+              <DoorOpen className="w-4 h-4" /> 
+              Live monitoring • <span className="font-semibold text-zinc-700">{guardGateName}</span>
+            </p>
           </div>
-          <div className="flex items-center gap-3 w-full sm:w-auto">
+          <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
             <Button variant="outline" onClick={handleLogout} className="flex-1 sm:flex-initial border-zinc-200 text-zinc-600 hover:bg-red-50 hover:text-red-600 hover:border-red-200 bg-white/80 backdrop-blur-sm">
               <LogOut className="w-4 h-4 mr-2" /> Sign Out
+            </Button>
+            <Button variant="outline" onClick={() => setShowQrModal(true)} className="flex-1 sm:flex-initial bg-white hover:bg-zinc-100 text-zinc-900 border-zinc-200 shadow-sm">
+              <QrCode className="w-4 h-4 mr-2" /> Show QR
             </Button>
             <Button onClick={() => setShowAddModal(true)} className="flex-1 sm:flex-initial bg-blue-600 hover:bg-blue-700 shadow-md">
               <UserPlus className="w-4 h-4 mr-2 hidden sm:inline-block" /> + New Visitor
@@ -489,7 +568,52 @@ export default function GuardDashboard() {
         askHost={askHost}
         askPurpose={askPurpose}
         askVehicle={askVehicle}
+        guardGateId={guardGateId}
       />
+
+      {/* --- QR CODE MODAL --- */}
+      {showQrModal && companyId && (
+        <div className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setShowQrModal(false)}>
+          <Card className="w-full max-w-sm shadow-2xl relative border-0 rounded-xl overflow-hidden bg-white" onClick={(e) => e.stopPropagation()}>
+            <div className="absolute top-0 left-0 w-full h-1.5 bg-blue-600"></div>
+            <button onClick={() => setShowQrModal(false)} className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-900 bg-zinc-100 hover:bg-zinc-200 rounded-full p-1.5 transition-colors">
+              <X size={18} />
+            </button>
+            <CardHeader className="pt-8 pb-2 text-center">
+              <CardTitle className="text-2xl font-black text-zinc-900 tracking-tight">Scan to Register</CardTitle>
+              <CardDescription className="text-zinc-500 font-medium">Visitor Self-Check-In</CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col items-center justify-center p-6 space-y-6">
+              <div className="p-4 bg-white border-2 border-zinc-200 rounded-2xl shadow-sm">
+                {/* Generates QR Code dynamically pointing to this specific gate */}
+                <Image 
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(`${window.location.origin}/${companyId}/gate${guardGateId ? `?gateId=${guardGateId}` : ''}`)}`}
+                  alt="Check-in QR Code"
+                  width={250}
+                  height={250}
+                  className="rounded-lg"
+                  unoptimized
+                />
+              </div>
+              <p className="text-sm text-zinc-500 text-center max-w-[250px]">
+                Have the visitor scan this code with their smartphone camera to open the registration form.
+              </p>
+              <div className="flex gap-3 w-full mt-2">
+                <Button variant="outline" className="flex-1" onClick={() => {
+                  const url = `${window.location.origin}/${companyId}/gate${guardGateId ? `?gateId=${guardGateId}` : ''}`;
+                  navigator.clipboard.writeText(url);
+                  alert("Link copied to clipboard!");
+                }}>
+                  Copy Link
+                </Button>
+                <Button className="flex-1 bg-zinc-900 hover:bg-zinc-800 text-white" onClick={handlePrintQr}>
+                  <Printer className="w-4 h-4 mr-2" /> Print QR
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* --- EXTRA VISIT INFO MODAL --- */}
       {infoModalVisitor && (

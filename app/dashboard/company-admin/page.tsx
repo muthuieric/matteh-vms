@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Download, Filter, Info, X, UserCircle } from "lucide-react";
+import { Download, Filter, Info, X, UserCircle, DoorOpen } from "lucide-react";
 
 // Define the shape of our Visitor data
 type Visitor = {
@@ -30,20 +30,29 @@ type Visitor = {
   purpose?: string;
   vehicle_reg?: string;
   photo_url?: string; 
-  custom_data?: Record<string, string>; // ADDED: To hold our dynamic form answers
+  custom_data?: Record<string, string>; // To hold our dynamic form answers
+  gate_id?: string | null; // NEW: Added gate_id
+};
+
+// NEW: Define Gate Type
+type Gate = {
+  id: string;
+  name: string;
 };
 
 export default function AdminDashboard() {
   const [visitors, setVisitors] = useState<Visitor[]>([]);
+  const [gates, setGates] = useState<Gate[]>([]); // NEW: State for gates
   const [lifetimeVisitors, setLifetimeVisitors] = useState(0);
   const [loading, setLoading] = useState(true);
   
-  // NEW: State to hold our custom field mapping (so we know ID '1712...' is 'Laptop Serial')
+  // State to hold our custom field mapping
   const [customFieldLabels, setCustomFieldLabels] = useState<Record<string, string>>({});
   
   // Filter States
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [gateFilter, setGateFilter] = useState("all"); // NEW: Gate filter
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
 
@@ -71,7 +80,7 @@ export default function AdminDashboard() {
       }
       // ----------------------------
 
-      // NEW: Fetch company ID and custom fields mapping
+      // Fetch company ID and custom fields mapping
       const { data: authData } = await supabase.auth.getUser();
       if (authData?.user) {
         const { data: profile } = await supabase
@@ -81,6 +90,7 @@ export default function AdminDashboard() {
           .single();
 
         if (profile?.company_id) {
+          // Fetch custom fields
           const { data: comp } = await supabase
             .from("companies")
             .select("custom_fields")
@@ -94,6 +104,17 @@ export default function AdminDashboard() {
               labelMap[f.id] = f.label;
             });
             setCustomFieldLabels(labelMap);
+          }
+
+          // NEW: Fetch Gates for this company
+          try {
+            const gatesRes = await fetch(`/api/gates?company_id=${profile.company_id}`);
+            if (gatesRes.ok) {
+              const gatesJson = await gatesRes.json();
+              if (gatesJson.data) setGates(gatesJson.data);
+            }
+          } catch (error) {
+            console.error("Error fetching gates:", error);
           }
         }
       }
@@ -152,6 +173,13 @@ export default function AdminDashboard() {
     };
   }, []);
 
+  // NEW: Helper to get Gate Name
+  const getGateName = (gateId?: string | null) => {
+    if (!gateId) return "Unassigned";
+    const gate = gates.find(g => g.id === gateId);
+    return gate ? gate.name : "Unknown Gate";
+  };
+
   // Filter visitors
   const filteredVisitors = visitors.filter((v) => {
     const query = searchQuery.toLowerCase();
@@ -172,6 +200,14 @@ export default function AdminDashboard() {
     }
 
     const matchesStatus = statusFilter === "all" || v.status === statusFilter;
+    
+    // NEW: Check gate filter
+    let matchesGate = true;
+    if (gateFilter === "unassigned") {
+      matchesGate = !v.gate_id;
+    } else if (gateFilter !== "all") {
+      matchesGate = v.gate_id === gateFilter;
+    }
 
     let matchesDate = true;
     const visitorTime = new Date(v.created_at).getTime();
@@ -187,7 +223,7 @@ export default function AdminDashboard() {
       if (visitorTime > end.getTime()) matchesDate = false;
     }
 
-    return matchesSearch && matchesStatus && matchesDate;
+    return matchesSearch && matchesStatus && matchesDate && matchesGate;
   });
 
   // Export to CSV Function
@@ -203,7 +239,7 @@ export default function AdminDashboard() {
     
     const headers = [
       "Date", "Visitor Name", "Phone Number", "Document Type", "ID Number", 
-      "Host Name", "Purpose", "Vehicle Reg", "Status", "Time In", "Time Out",
+      "Host Name", "Purpose", "Vehicle Reg", "Status", "Entry Gate", "Time In", "Time Out",
       ...customHeaders // Add dynamic headers
     ];
     
@@ -211,7 +247,8 @@ export default function AdminDashboard() {
       const date = new Date(v.created_at).toLocaleDateString();
       const timeIn = new Date(v.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const timeOut = v.checked_out_at ? new Date(v.checked_out_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "--";
-      
+      const gateName = getGateName(v.gate_id);
+
       const standardData = [
         `"${date}"`,
         `"${v.name}"`,
@@ -222,6 +259,7 @@ export default function AdminDashboard() {
         `"${v.purpose || 'N/A'}"`,
         `"${v.vehicle_reg || 'N/A'}"`,
         `"${v.status.replace(/_/g, " ").toUpperCase()}"`,
+        `"${gateName}"`, // ADDED GATE
         `"${timeIn}"`,
         `"${timeOut}"`
       ];
@@ -239,7 +277,7 @@ export default function AdminDashboard() {
     link.setAttribute("href", url);
     const todayStr = new Date().toISOString().split('T')[0];
     
-    const fileName = searchQuery || startDate || statusFilter !== "all"
+    const fileName = searchQuery || startDate || statusFilter !== "all" || gateFilter !== "all"
       ? `Filtered_Report_${todayStr}.csv` 
       : `Building_Visitor_Log_${todayStr}.csv`;
       
@@ -269,7 +307,7 @@ export default function AdminDashboard() {
           <div className="flex gap-3 w-full sm:w-auto">
             <Button variant="default" onClick={downloadCSV} className="shadow-sm bg-zinc-900 hover:bg-zinc-800 text-white w-full sm:w-auto">
               <Download className="w-4 h-4 mr-2" />
-              Download {searchQuery || startDate || statusFilter !== "all" ? "Filtered" : "CSV"} Report
+              Download {(searchQuery || startDate || statusFilter !== "all" || gateFilter !== "all") ? "Filtered" : "CSV"} Report
             </Button>
           </div>
         </div>
@@ -342,7 +380,26 @@ export default function AdminDashboard() {
                 <Filter className="w-4 h-4 text-zinc-500" /> Filter Options
               </div>
               
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                
+                {/* Gate Dropdown */}
+                <div className="space-y-1.5 w-full">
+                  <label className="text-xs font-medium text-zinc-500 block">Entry Gate</label>
+                  <select
+                    className="h-10 w-full rounded-md border border-zinc-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600 text-zinc-700 font-medium"
+                    value={gateFilter}
+                    onChange={(e) => setGateFilter(e.target.value)}
+                  >
+                    <option value="all">All Gates</option>
+                    <option value="unassigned">Unassigned (Walk-ins)</option>
+                    {gates.map((gate) => (
+                      <option key={gate.id} value={gate.id}>
+                        {gate.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 {/* Status Dropdown */}
                 <div className="space-y-1.5 w-full">
                   <label className="text-xs font-medium text-zinc-500 block">Status</label>
@@ -390,7 +447,7 @@ export default function AdminDashboard() {
               <p className="text-zinc-500 py-6 text-center">Loading reports...</p>
             ) : filteredVisitors.length === 0 ? (
               <p className="text-zinc-500 py-6 text-center">
-                {(searchQuery || startDate || statusFilter !== "all") ? "No matching visitors found for these filters." : "No records found."}
+                {(searchQuery || startDate || statusFilter !== "all" || gateFilter !== "all") ? "No matching visitors found for these filters." : "No records found."}
               </p>
             ) : (
               <div className="rounded-none sm:rounded-md border-y sm:border overflow-x-auto">
@@ -399,7 +456,7 @@ export default function AdminDashboard() {
                     <TableRow>
                       <TableHead className="whitespace-nowrap">Date</TableHead>
                       <TableHead className="whitespace-nowrap">Visitor Details</TableHead>
-                      <TableHead className="whitespace-nowrap">ID / Doc</TableHead>
+                      <TableHead className="whitespace-nowrap">Entry Gate</TableHead>
                       <TableHead className="whitespace-nowrap">Status</TableHead>
                       <TableHead className="whitespace-nowrap">Time In</TableHead>
                       <TableHead className="whitespace-nowrap">Time Out</TableHead>
@@ -452,10 +509,15 @@ export default function AdminDashboard() {
                               </div>
                             </div>
                           </TableCell>
-                          <TableCell>
-                            <div className="text-sm whitespace-nowrap">{visitor.document_type || "—"}</div>
-                            <div className="text-xs text-zinc-500 whitespace-nowrap">{visitor.id_number || "N/A"}</div>
+                          
+                          {/* ENTRY GATE */}
+                          <TableCell className="whitespace-nowrap">
+                             <span className="inline-flex items-center gap-1.5 rounded-md bg-zinc-100 px-2 py-1 text-xs font-medium text-zinc-600 ring-1 ring-inset ring-zinc-500/10">
+                                <DoorOpen className="h-3 w-3" />
+                                {getGateName(visitor.gate_id)}
+                             </span>
                           </TableCell>
+
                           <TableCell className="whitespace-nowrap">
                             {visitor.status === "pending" && <span className="text-amber-600 text-xs font-bold uppercase">Pending</span>}
                             {visitor.status === "checked_in" && <span className="text-green-600 text-xs font-bold uppercase">Inside</span>}
@@ -497,6 +559,12 @@ export default function AdminDashboard() {
             <CardContent className="p-6 space-y-5 bg-zinc-50/50">
               
               {/* Standard Fields */}
+              {infoModalVisitor.document_type && (
+                <div>
+                  <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1">ID / Document</p>
+                  <p className="font-medium text-zinc-900 text-lg leading-snug">{infoModalVisitor.document_type} - {infoModalVisitor.id_number || "N/A"}</p>
+                </div>
+              )}
               {infoModalVisitor.host_name && (
                 <div>
                   <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1">Host Name</p>

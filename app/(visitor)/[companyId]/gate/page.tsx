@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
-import { useParams } from "next/navigation";
+import { useEffect, useState, useRef, Suspense } from "react";
+import { useParams, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { supabase } from "@/lib/supabase";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -20,13 +20,17 @@ type CustomField = {
   active: boolean;
 };
 
-// ADD THESE TWO TYPES:
+// Define the structure for Departments and Hosts
 type Department = { id: string; name: string };
 type Host = { id: string; name: string; phone: string; email: string; department_id: string };
 
-export default function PublicGateCheckIn() {
+// We wrap the main component content in a sub-component so we can use useSearchParams safely in a Suspense boundary
+function CheckInFormContent() {
   const params = useParams();
+  const searchParams = useSearchParams();
+  
   const companyId = params.companyId as string;
+  const urlGateId = searchParams.get("gateId"); // <-- NEW: Grabs the gate ID from the URL
 
   const [loading, setLoading] = useState(true);
   const [companyName, setCompanyName] = useState("");
@@ -53,7 +57,7 @@ export default function PublicGateCheckIn() {
     name: "", phone: "", id_number: "", doc_type: "National ID", host_id: "", purpose: "", vehicle_reg: "" 
   });
 
-  // State for Departments and Hosts (REPLACE any[] WITH THE NEW TYPES)
+  // State for Departments and Hosts
   const [departments, setDepartments] = useState<Department[]>([]);
   const [hosts, setHosts] = useState<Host[]>([]);
   
@@ -121,7 +125,7 @@ export default function PublicGateCheckIn() {
         setCustomFields(activeFields);
       }
 
-      // Fetch Departments and Hosts safely via API (bypassing RLS for public users)
+      // Fetch Departments and Hosts safely via API
       try {
         const deptsRes = await fetch(`/api/departments?company_id=${companyId}`);
         if (deptsRes.ok) {
@@ -144,7 +148,6 @@ export default function PublicGateCheckIn() {
     fetchCompanyData();
   }, [companyId]);
 
-  // Compute filtered hosts based on the search query
   const filteredDepartments = departments.map(dept => {
     const deptHosts = hosts.filter(h => 
       h.department_id === dept.id && 
@@ -211,7 +214,46 @@ export default function PublicGateCheckIn() {
     let uploadedPhotoUrl = null;
 
     try {
-      // 1. Upload Selfie to Cloudflare R2 if present
+      // Format the phone number
+      let finalPhone = null;
+      if (rules.askPhone && newVisitor.phone) {
+        finalPhone = newVisitor.phone.startsWith('+') ? newVisitor.phone : `+${newVisitor.phone}`;
+      }
+
+      // --- 1. ROBUST BLACKLIST SECURITY CHECK (USING SECURE API) ---
+      const redFlagsRes = await fetch(`/api/red-flags?company_id=${companyId}`);
+      if (redFlagsRes.ok) {
+        const redFlagsJson = await redFlagsRes.json();
+        const blacklisted = redFlagsJson.data || [];
+
+        if (blacklisted.length > 0) {
+          const isBanned = blacklisted.find((flag: any) => {
+            const matchId = rules.askId && flag.id_number && newVisitor.id_number && flag.id_number.trim() === newVisitor.id_number.trim();
+            const matchPhone = rules.askPhone && flag.phone && finalPhone && flag.phone.trim() === finalPhone.trim();
+            const matchName = flag.name && newVisitor.name && flag.name.trim().toLowerCase() === newVisitor.name.trim().toLowerCase();
+            
+            if (matchId || matchPhone) return true;
+
+            if (matchName) {
+              const hasDifferentId = rules.askId && newVisitor.id_number && flag.id_number && newVisitor.id_number.trim() !== flag.id_number.trim();
+              const hasDifferentPhone = rules.askPhone && finalPhone && flag.phone && finalPhone.trim() !== flag.phone.trim();
+              
+              if (hasDifferentId || hasDifferentPhone) return false;
+              return true; 
+            }
+
+            return false;
+          });
+
+          if (isBanned) {
+            alert(`⚠️ ACCESS DENIED: You are restricted from entering the premises.\n\nReason: ${isBanned.reason}`);
+            setIsSubmitting(false);
+            return;
+          }
+        }
+      }
+
+      // 2. Upload Selfie
       if (selfieFile) {
         const compressedFile = await compressImage(selfieFile);
         
@@ -232,13 +274,7 @@ export default function PublicGateCheckIn() {
         }
       }
 
-      // Format the phone number
-      let finalPhone = null;
-      if (rules.askPhone && newVisitor.phone) {
-        finalPhone = newVisitor.phone.startsWith('+') ? newVisitor.phone : `+${newVisitor.phone}`;
-      }
-
-      // 2. Insert Visitor Record
+      // 3. Insert Visitor Record
       const { error } = await supabase.from("visitors").insert([
         {
           company_id: companyId,
@@ -247,12 +283,13 @@ export default function PublicGateCheckIn() {
           document_type: rules.askId ? newVisitor.doc_type : null,
           id_number: rules.askId ? newVisitor.id_number : null,
           host_id: rules.askHost && newVisitor.host_id ? newVisitor.host_id : null,
-          host_name: rules.askHost && newVisitor.host_id ? hostSearchQuery : null, // Saves exact name string for guards
+          host_name: rules.askHost && newVisitor.host_id ? hostSearchQuery : null, 
           purpose: rules.askPurpose ? newVisitor.purpose : null,
           vehicle_reg: rules.askVehicle ? newVisitor.vehicle_reg : null,
           status: "pending",
           photo_url: uploadedPhotoUrl,
-          custom_data: customAnswers // Save custom answers
+          custom_data: customAnswers,
+          gate_id: urlGateId || null // <-- NEW: Saves the gate ID from the URL!
         }
       ]);
 
@@ -308,234 +345,242 @@ export default function PublicGateCheckIn() {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-50 p-4 py-8 flex items-center justify-center relative overflow-hidden">
+    <Card className="w-full max-w-md shadow-2xl relative border-t-4 border-t-blue-600 bg-white/95 backdrop-blur-sm z-10">
+      <CardHeader className="text-center pb-6">
+        <CardDescription className="uppercase tracking-widest font-bold text-xs text-blue-600 mb-1">Welcome To</CardDescription>
+        <CardTitle className="text-2xl font-black text-zinc-900 tracking-tight">{companyName}</CardTitle>
+        <p className="text-sm text-zinc-500 mt-2">Please fill out this form to register your visit.</p>
+      </CardHeader>
       
+      <CardContent>
+        {/* HIDDEN FILE INPUT FOR ID CARD */}
+        <input 
+          type="file" accept="image/*" capture="environment" 
+          className="hidden" ref={fileInputRef} onChange={handleImageCapture} 
+        />
+        
+        <Button 
+          variant="outline" 
+          type="button"
+          className="w-full mb-6 border-dashed border-2 py-8 text-blue-600 border-blue-200 bg-blue-50 hover:bg-blue-100 shadow-sm"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={isScanning}
+        >
+          {isScanning ? (
+            <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Analyzing ID Card...</>
+          ) : (
+            <><ScanLine className="mr-2 h-5 w-5" /> Auto-Fill using ID Card</>
+          )}
+        </Button>
+
+        <div className="relative mb-6">
+          <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-zinc-200" /></div>
+          <div className="relative flex justify-center text-xs uppercase font-bold tracking-wider"><span className="bg-white px-2 text-zinc-400">Or enter manually</span></div>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <Label className="mb-1 block font-semibold text-zinc-700">Full Name <span className="text-red-500">*</span></Label>
+            <Input required value={newVisitor.name} onChange={(e) => setNewVisitor({...newVisitor, name: e.target.value})} placeholder="e.g. John Doe" className="h-12 bg-zinc-50" />
+          </div>
+
+          {rules.askPhone && (
+            <div>
+              <Label className="mb-1 block font-semibold text-zinc-700">Phone Number <span className="text-red-500">*</span></Label>
+              <PhoneInput 
+                country="ke" 
+                value={newVisitor.phone} 
+                onChange={phone => setNewVisitor({ ...newVisitor, phone })} 
+                inputClass="!w-full !h-12 !text-zinc-900 !bg-zinc-50 !rounded-md !border !border-zinc-300 focus:!ring-2 focus:!ring-blue-600 px-3" 
+                containerClass="w-full" 
+                buttonClass="!border-zinc-300 !bg-zinc-50 !rounded-l-md hover:!bg-zinc-100"
+              />
+            </div>
+          )}
+
+          {rules.askId && (
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label className="mb-1 block font-semibold text-zinc-700">Document Type</Label>
+                <select
+                  className="flex h-12 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  value={newVisitor.doc_type}
+                  onChange={(e) => setNewVisitor({...newVisitor, doc_type: e.target.value})}
+                >
+                  <option value="National ID">National ID</option>
+                  <option value="Passport">Passport</option>
+                  <option value="Driver's License">Driver's License</option>
+                </select>
+              </div>
+              <div>
+                <Label className="mb-1 block font-semibold text-zinc-700">ID Number</Label>
+                <Input 
+                  value={newVisitor.id_number} 
+                  onChange={(e) => setNewVisitor({...newVisitor, id_number: e.target.value})} 
+                  placeholder="If applicable" 
+                  className="h-12 bg-zinc-50"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* SEARCHABLE HOST DROPDOWN */}
+          {rules.askHost && (
+            <div className="relative" ref={dropdownRef}>
+              <Label className="mb-1 block font-semibold text-zinc-700">Who are you visiting?</Label>
+              <Input
+                type="text"
+                placeholder="Type to search for a host..."
+                value={hostSearchQuery}
+                onChange={(e) => {
+                  setHostSearchQuery(e.target.value);
+                  setIsHostDropdownOpen(true);
+                  setNewVisitor({ ...newVisitor, host_id: "" });
+                }}
+                onFocus={() => setIsHostDropdownOpen(true)}
+                className="h-12 bg-zinc-50"
+                autoComplete="off"
+              />
+              
+              <input type="text" className="hidden" required value={newVisitor.host_id} onChange={() => {}} />
+
+              {isHostDropdownOpen && (
+                <div className="absolute z-10 w-full mt-1 bg-white border border-zinc-200 rounded-md shadow-xl max-h-60 overflow-y-auto">
+                  {filteredDepartments.length === 0 ? (
+                    <div className="p-4 text-sm text-zinc-500 text-center">No matching hosts found.</div>
+                  ) : (
+                    filteredDepartments.map((dept) => (
+                      <div key={dept.id}>
+                        <div className="px-3 py-2 text-xs font-bold bg-zinc-100/80 text-zinc-500 uppercase tracking-wider sticky top-0 backdrop-blur-sm">
+                          {dept.name}
+                        </div>
+                        {dept.hosts.map((host: Host) => (
+                          <div
+                            key={host.id}
+                            className="px-4 py-3 text-sm text-zinc-900 hover:bg-blue-50 cursor-pointer border-b border-zinc-50 last:border-0 transition-colors"
+                            onClick={() => {
+                              setNewVisitor({ ...newVisitor, host_id: host.id });
+                              setHostSearchQuery(host.name);
+                              setIsHostDropdownOpen(false);
+                            }}
+                          >
+                            <div className="font-medium">{host.name}</div>
+                          </div>
+                        ))}
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {rules.askPurpose && (
+            <div>
+              <Label className="mb-1 block font-semibold text-zinc-700">Purpose of Visit</Label>
+              <Input 
+                value={newVisitor.purpose} 
+                onChange={(e) => setNewVisitor({...newVisitor, purpose: e.target.value})} 
+                placeholder="e.g. Meeting, Delivery, Interview" 
+                className="h-12 bg-zinc-50"
+              />
+            </div>
+          )}
+
+          {rules.askVehicle && (
+            <div>
+              <Label className="mb-1 block font-semibold text-zinc-700">Vehicle Registration</Label>
+              <Input 
+                value={newVisitor.vehicle_reg} 
+                onChange={(e) => setNewVisitor({...newVisitor, vehicle_reg: e.target.value})} 
+                placeholder="e.g. KCA 123A (Leave blank if walk-in)" 
+                className="h-12 bg-zinc-50 uppercase"
+              />
+            </div>
+          )}
+
+          {/* DYNAMIC CUSTOM FIELDS RENDERING */}
+          {customFields.map((field) => (
+            <div key={field.id}>
+              <Label className="mb-1 block font-semibold text-zinc-700">{field.label}</Label>
+              <Input 
+                value={customAnswers[field.id] || ""} 
+                onChange={(e) => setCustomAnswers({...customAnswers, [field.id]: e.target.value})} 
+                placeholder={`Enter ${field.label.toLowerCase()}`} 
+                className="h-12 bg-zinc-50"
+              />
+            </div>
+          ))}
+
+          {rules.requirePhoto && (
+            <div className="space-y-3 pt-2 pb-2">
+              <Label className="flex justify-between items-center font-semibold text-zinc-700">
+                Security Photo
+                <span className="text-xs text-red-500 font-bold uppercase tracking-wider">* Required</span>
+              </Label>
+              
+              <div className="flex items-center gap-4 bg-zinc-50 p-3 rounded-xl border border-zinc-200">
+                <div className="w-16 h-16 rounded-full bg-white border-2 border-dashed border-zinc-300 flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
+                  {selfiePreview ? (
+                    <Image 
+                      src={selfiePreview} 
+                      alt="Selfie preview" 
+                      width={64}
+                      height={64}
+                      className="w-full h-full object-cover" 
+                      unoptimized
+                    />
+                  ) : (
+                    <UserCircle className="w-8 h-8 text-zinc-300" />
+                  )}
+                </div>
+                
+                <div className="flex-1">
+                  <input 
+                    type="file" accept="image/*" capture="user" 
+                    className="hidden" ref={selfieInputRef} onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        setSelfieFile(file);
+                        setSelfiePreview(URL.createObjectURL(file));
+                      }
+                    }} 
+                  />
+                  <Button 
+                    type="button" variant="outline" className="w-full text-sm h-12 bg-white hover:bg-zinc-100 shadow-sm border-zinc-300 text-zinc-700 font-bold"
+                    onClick={() => selfieInputRef.current?.click()}
+                  >
+                    <Camera className="w-5 h-5 mr-2" /> Take Selfie
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <Button type="submit" className="w-full mt-6 h-14 text-lg font-bold bg-blue-600 hover:bg-blue-700 shadow-lg transition-transform active:scale-[0.98]" disabled={isSubmitting}>
+            {isSubmitting ? <><Loader2 className="mr-2 h-5 w-5 animate-spin"/> Processing...</> : "Submit Registration"}
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+// Wrapping the entire page in a Suspense boundary for `useSearchParams()`
+export default function PublicGateCheckInWrapper() {
+  return (
+    <div className="min-h-screen bg-zinc-50 p-4 py-8 flex items-center justify-center relative overflow-hidden">
       {/* Ambient Background Elements */}
       <div className="absolute top-[-10%] left-[-10%] h-[300px] w-[300px] rounded-full bg-blue-400/20 blur-[100px] pointer-events-none" />
       <div className="absolute bottom-[-10%] right-[-10%] h-[300px] w-[300px] rounded-full bg-amber-400/20 blur-[100px] pointer-events-none" />
       
-      <Card className="w-full max-w-md shadow-2xl relative border-t-4 border-t-blue-600 bg-white/95 backdrop-blur-sm z-10">
-        <CardHeader className="text-center pb-6">
-          <CardDescription className="uppercase tracking-widest font-bold text-xs text-blue-600 mb-1">Welcome To</CardDescription>
-          <CardTitle className="text-2xl font-black text-zinc-900 tracking-tight">{companyName}</CardTitle>
-          <p className="text-sm text-zinc-500 mt-2">Please fill out this form to register your visit.</p>
-        </CardHeader>
-        
-        <CardContent>
-          {/* HIDDEN FILE INPUT FOR ID CARD */}
-          <input 
-            type="file" accept="image/*" capture="environment" 
-            className="hidden" ref={fileInputRef} onChange={handleImageCapture} 
-          />
-          
-          <Button 
-            variant="outline" 
-            type="button"
-            className="w-full mb-6 border-dashed border-2 py-8 text-blue-600 border-blue-200 bg-blue-50 hover:bg-blue-100 shadow-sm"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isScanning}
-          >
-            {isScanning ? (
-              <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Analyzing ID Card...</>
-            ) : (
-              <><ScanLine className="mr-2 h-5 w-5" /> Auto-Fill using ID Card</>
-            )}
-          </Button>
-
-          <div className="relative mb-6">
-            <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-zinc-200" /></div>
-            <div className="relative flex justify-center text-xs uppercase font-bold tracking-wider"><span className="bg-white px-2 text-zinc-400">Or enter manually</span></div>
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <Label className="mb-1 block font-semibold text-zinc-700">Full Name <span className="text-red-500">*</span></Label>
-              <Input required value={newVisitor.name} onChange={(e) => setNewVisitor({...newVisitor, name: e.target.value})} placeholder="e.g. John Doe" className="h-12 bg-zinc-50" />
-            </div>
-
-            {/* DYNAMIC FIELD: PHONE WITH REACT-PHONE-INPUT-2 */}
-            {rules.askPhone && (
-              <div>
-                <Label className="mb-1 block font-semibold text-zinc-700">Phone Number <span className="text-red-500">*</span></Label>
-                <PhoneInput 
-                  country="ke" 
-                  value={newVisitor.phone} 
-                  onChange={phone => setNewVisitor({ ...newVisitor, phone })} 
-                  inputClass="!w-full !h-12 !text-zinc-900 !bg-zinc-50 !rounded-md !border !border-zinc-300 focus:!ring-2 focus:!ring-blue-600 px-3" 
-                  containerClass="w-full" 
-                  buttonClass="!border-zinc-300 !bg-zinc-50 !rounded-l-md hover:!bg-zinc-100"
-                />
-              </div>
-            )}
-
-            {/* DYNAMIC FIELDS: ID DOCUMENTS (SIDE-BY-SIDE GRID) */}
-            {rules.askId && (
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="mb-1 block font-semibold text-zinc-700">Document Type</Label>
-                  <select
-                    className="flex h-12 w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
-                    value={newVisitor.doc_type}
-                    onChange={(e) => setNewVisitor({...newVisitor, doc_type: e.target.value})}
-                  >
-                    <option value="National ID">National ID</option>
-                    <option value="Passport">Passport</option>
-                    <option value="Driver's License">Driver's License</option>
-                  </select>
-                </div>
-                <div>
-                  <Label className="mb-1 block font-semibold text-zinc-700">ID Number</Label>
-                  <Input 
-                    value={newVisitor.id_number} 
-                    onChange={(e) => setNewVisitor({...newVisitor, id_number: e.target.value})} 
-                    placeholder="If applicable" 
-                    className="h-12 bg-zinc-50"
-                  />
-                </div>
-              </div>
-            )}
-
-            {/* SEARCHABLE HOST DROPDOWN */}
-            {rules.askHost && (
-              <div className="relative" ref={dropdownRef}>
-                <Label className="mb-1 block font-semibold text-zinc-700">Who are you visiting?</Label>
-                <Input
-                  type="text"
-                  placeholder="Type to search for a host..."
-                  value={hostSearchQuery}
-                  onChange={(e) => {
-                    setHostSearchQuery(e.target.value);
-                    setIsHostDropdownOpen(true);
-                    setNewVisitor({ ...newVisitor, host_id: "" }); // Reset ID if they type to enforce selecting from list
-                  }}
-                  onFocus={() => setIsHostDropdownOpen(true)}
-                  className="h-12 bg-zinc-50"
-                  autoComplete="off"
-                />
-                
-                {/* Hidden input to enforce standard HTML required validation */}
-                <input type="text" className="hidden" required value={newVisitor.host_id} onChange={() => {}} />
-
-                {isHostDropdownOpen && (
-                  <div className="absolute z-10 w-full mt-1 bg-white border border-zinc-200 rounded-md shadow-xl max-h-60 overflow-y-auto">
-                    {filteredDepartments.length === 0 ? (
-                      <div className="p-4 text-sm text-zinc-500 text-center">No matching hosts found.</div>
-                    ) : (
-                      filteredDepartments.map((dept) => (
-                        <div key={dept.id}>
-                          <div className="px-3 py-2 text-xs font-bold bg-zinc-100/80 text-zinc-500 uppercase tracking-wider sticky top-0 backdrop-blur-sm">
-                            {dept.name}
-                          </div>
-                          {dept.hosts.map((host) => (
-                            <div
-                              key={host.id}
-                              className="px-4 py-3 text-sm text-zinc-900 hover:bg-blue-50 cursor-pointer border-b border-zinc-50 last:border-0 transition-colors"
-                              onClick={() => {
-                                setNewVisitor({ ...newVisitor, host_id: host.id });
-                                setHostSearchQuery(host.name);
-                                setIsHostDropdownOpen(false);
-                              }}
-                            >
-                              <div className="font-medium">{host.name}</div>
-                            </div>
-                          ))}
-                        </div>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {rules.askPurpose && (
-              <div>
-                <Label className="mb-1 block font-semibold text-zinc-700">Purpose of Visit</Label>
-                <Input 
-                  value={newVisitor.purpose} 
-                  onChange={(e) => setNewVisitor({...newVisitor, purpose: e.target.value})} 
-                  placeholder="e.g. Meeting, Delivery, Interview" 
-                  className="h-12 bg-zinc-50"
-                />
-              </div>
-            )}
-
-            {rules.askVehicle && (
-              <div>
-                <Label className="mb-1 block font-semibold text-zinc-700">Vehicle Registration</Label>
-                <Input 
-                  value={newVisitor.vehicle_reg} 
-                  onChange={(e) => setNewVisitor({...newVisitor, vehicle_reg: e.target.value})} 
-                  placeholder="e.g. KCA 123A (Leave blank if walk-in)" 
-                  className="h-12 bg-zinc-50 uppercase"
-                />
-              </div>
-            )}
-
-            {/* DYNAMIC CUSTOM FIELDS RENDERING */}
-            {customFields.map((field) => (
-              <div key={field.id}>
-                <Label className="mb-1 block font-semibold text-zinc-700">{field.label}</Label>
-                <Input 
-                  value={customAnswers[field.id] || ""} 
-                  onChange={(e) => setCustomAnswers({...customAnswers, [field.id]: e.target.value})} 
-                  placeholder={`Enter ${field.label.toLowerCase()}`} 
-                  className="h-12 bg-zinc-50"
-                />
-              </div>
-            ))}
-
-            {/* SECURITY PHOTO - ONLY VISIBLE IF ADMIN TOGGLED IT ON */}
-            {rules.requirePhoto && (
-              <div className="space-y-3 pt-2 pb-2">
-                <Label className="flex justify-between items-center font-semibold text-zinc-700">
-                  Security Photo
-                  <span className="text-xs text-red-500 font-bold uppercase tracking-wider">* Required</span>
-                </Label>
-                
-                <div className="flex items-center gap-4 bg-zinc-50 p-3 rounded-xl border border-zinc-200">
-                  <div className="w-16 h-16 rounded-full bg-white border-2 border-dashed border-zinc-300 flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
-                    {selfiePreview ? (
-                      <Image 
-                        src={selfiePreview} 
-                        alt="Selfie preview" 
-                        width={64}
-                        height={64}
-                        className="w-full h-full object-cover" 
-                        unoptimized
-                      />
-                    ) : (
-                      <UserCircle className="w-8 h-8 text-zinc-300" />
-                    )}
-                  </div>
-                  
-                  <div className="flex-1">
-                    <input 
-                      type="file" accept="image/*" capture="user" 
-                      className="hidden" ref={selfieInputRef} onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) {
-                          setSelfieFile(file);
-                          setSelfiePreview(URL.createObjectURL(file));
-                        }
-                      }} 
-                    />
-                    <Button 
-                      type="button" variant="outline" className="w-full text-sm h-12 bg-white hover:bg-zinc-100 shadow-sm border-zinc-300 text-zinc-700 font-bold"
-                      onClick={() => selfieInputRef.current?.click()}
-                    >
-                      <Camera className="w-5 h-5 mr-2" /> Take Selfie
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <Button type="submit" className="w-full mt-6 h-14 text-lg font-bold bg-blue-600 hover:bg-blue-700 shadow-lg transition-transform active:scale-[0.98]" disabled={isSubmitting}>
-              {isSubmitting ? <><Loader2 className="mr-2 h-5 w-5 animate-spin"/> Processing...</> : "Submit Registration"}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+      <Suspense fallback={
+        <div className="flex flex-col items-center z-10">
+          <Loader2 className="w-10 h-10 animate-spin text-blue-600 mb-4" />
+        </div>
+      }>
+        <CheckInFormContent />
+      </Suspense>
     </div>
   );
 }

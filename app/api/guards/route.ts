@@ -50,7 +50,8 @@ async function verifyAdminCaller(request: Request, targetCompanyId?: string) {
 
 export async function POST(request: Request) {
   try {
-    const { email, password, fullName, companyId } = await request.json();
+    // --- GATE FIX 1: Extract gateId from the incoming request ---
+    const { email, password, fullName, companyId, gateId } = await request.json();
 
     if (!email || !password || !fullName || !companyId) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
@@ -80,6 +81,8 @@ export async function POST(request: Request) {
         company_id: companyId,
         role: "guard",
         full_name: fullName,
+        // --- GATE FIX 2: Save the assigned gate to the database ---
+        gate_id: gateId || null, 
       });
 
     if (profileError) {
@@ -139,5 +142,49 @@ export async function DELETE(request: Request) {
       { error: error.message || "Failed to delete guard account" }, 
       { status: 500 }
     );
+  }
+}
+
+export async function PUT(request: Request) {
+  try {
+    const body = await request.json();
+    const { id, fullName, gateId } = body;
+
+    if (!id || !fullName) {
+      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+    }
+
+    // --- SECURITY FIX: Prevent IDOR (Editing guards from other companies) ---
+    const { data: guardProfile } = await supabaseAdmin
+      .from('profiles')
+      .select('company_id')
+      .eq('id', id)
+      .single();
+
+    if (!guardProfile) {
+      return NextResponse.json({ error: "Guard not found" }, { status: 404 });
+    }
+
+    const authCheck = await verifyAdminCaller(request, guardProfile.company_id);
+    if (authCheck.error) {
+      return NextResponse.json({ error: authCheck.error }, { status: authCheck.status });
+    }
+    // ------------------------------------------------------------------------
+
+    // Update the guard's profile record
+    const { error } = await supabaseAdmin
+      .from("profiles")
+      .update({ 
+        full_name: fullName, 
+        gate_id: gateId || null 
+      })
+      .eq("id", id);
+
+    if (error) throw error;
+
+    return NextResponse.json({ success: true, message: "Guard profile updated successfully." });
+  } catch (error: any) {
+    console.error("Guard Update Error:", error.message || error);
+    return NextResponse.json({ error: error.message || "Failed to update guard account" }, { status: 500 });
   }
 }

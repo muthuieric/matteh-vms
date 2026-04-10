@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Camera, Loader2, X, UserCircle, ScanLine } from "lucide-react";
+import { Camera, Loader2, X, UserCircle, ScanLine, AlertOctagon } from "lucide-react";
 import PhoneInput from "react-phone-input-2";
 import "react-phone-input-2/lib/style.css";
 import { compressImage } from "@/lib/image-compression";
@@ -30,6 +30,7 @@ export interface AddVisitorModalProps {
   askHost?: boolean;
   askPurpose?: boolean;
   askVehicle?: boolean;
+  guardGateId?: string | null;
 }
 
 export default function AddVisitorModal({
@@ -42,6 +43,7 @@ export default function AddVisitorModal({
   askHost = false,
   askPurpose = false,
   askVehicle = false,
+  guardGateId = null,
 }: AddVisitorModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [newVisitor, setNewVisitor] = useState({ 
@@ -194,7 +196,51 @@ export default function AddVisitorModal({
     let uploadedPhotoUrl = null;
 
     try {
-      // 1. Upload Selfie to Cloudflare R2 if present
+      // Format the phone number to ensure consistent checking
+      let finalPhone = null;
+      if (askPhone && newVisitor.phone) {
+        finalPhone = newVisitor.phone.startsWith('+') ? newVisitor.phone : `+${newVisitor.phone}`;
+      }
+
+      // --- 1. ROBUST BLACKLIST SECURITY CHECK (USING SECURE API) ---
+      const redFlagsRes = await fetch(`/api/red-flags?company_id=${companyId}`);
+      if (redFlagsRes.ok) {
+        const redFlagsJson = await redFlagsRes.json();
+        const blacklisted = redFlagsJson.data || [];
+
+        if (blacklisted.length > 0) {
+          const isBanned = blacklisted.find((flag: any) => {
+            const matchId = askId && flag.id_number && newVisitor.id_number && flag.id_number.trim() === newVisitor.id_number.trim();
+            const matchPhone = askPhone && flag.phone && finalPhone && flag.phone.trim() === finalPhone.trim();
+            const matchName = flag.name && newVisitor.name && flag.name.trim().toLowerCase() === newVisitor.name.trim().toLowerCase();
+            
+            // 1. If ID or Phone matches exactly, it is definitely the blacklisted person
+            if (matchId || matchPhone) return true;
+
+            // 2. If the NAME matches, we must verify they aren't an innocent person with the same name
+            if (matchName) {
+              const hasDifferentId = askId && newVisitor.id_number && flag.id_number && newVisitor.id_number.trim() !== flag.id_number.trim();
+              const hasDifferentPhone = askPhone && finalPhone && flag.phone && finalPhone.trim() !== flag.phone.trim();
+              
+              // If they provided a DIFFERENT ID or Phone, they are an innocent person sharing the same name! Let them through.
+              if (hasDifferentId || hasDifferentPhone) return false;
+              
+              // If they didn't provide an ID/Phone to prove otherwise, keep them banned just in case
+              return true; 
+            }
+
+            return false;
+          });
+
+          if (isBanned) {
+            alert(`⚠️ ACCESS DENIED: This visitor is restricted from entering the building.\n\nReason: ${isBanned.reason}`);
+            setIsSubmitting(false);
+            return; // Stop the registration process entirely
+          }
+        }
+      }
+
+      // 2. Upload Selfie to Cloudflare R2 if present
       if (selfieFile) {
         const compressedFile = await compressImage(selfieFile);
         
@@ -215,13 +261,10 @@ export default function AddVisitorModal({
         }
       }
 
-      // Format the phone number
-      let finalPhone = null;
-      if (askPhone && newVisitor.phone) {
-        finalPhone = newVisitor.phone.startsWith('+') ? newVisitor.phone : `+${newVisitor.phone}`;
-      }
+      // 3. Insert Visitor Record
+      // Ensuring gate_id falls back strictly to null if missing or empty string to prevent disappearing UI issues
+      const finalGateId = guardGateId && guardGateId !== "" && guardGateId !== "unassigned" ? guardGateId : null;
 
-      // 2. Insert Visitor Record
       const { error } = await supabase.from("visitors").insert([
         {
           company_id: companyId,
@@ -235,7 +278,8 @@ export default function AddVisitorModal({
           vehicle_reg: askVehicle ? newVisitor.vehicle_reg : null,
           status: "pending",
           photo_url: uploadedPhotoUrl,
-          custom_data: customAnswers // Save custom answers
+          custom_data: customAnswers,
+          gate_id: finalGateId 
         }
       ]);
 
@@ -243,7 +287,7 @@ export default function AddVisitorModal({
 
       // Reset form and close modal
       setNewVisitor({ name: "", phone: "", id_number: "", doc_type: "National ID", host_id: "", purpose: "", vehicle_reg: "" });
-      setHostSearchQuery(""); // Reset host search
+      setHostSearchQuery(""); 
       setCustomAnswers({});
       setSelfieFile(null);
       setSelfiePreview(null);
@@ -354,7 +398,6 @@ export default function AddVisitorModal({
                   autoComplete="off"
                 />
                 
-                {/* Hidden input to enforce standard HTML required validation if needed */}
                 <input type="text" className="hidden" required value={newVisitor.host_id} onChange={() => {}} />
 
                 {isHostDropdownOpen && (
@@ -470,7 +513,7 @@ export default function AddVisitorModal({
             )}
 
             <Button type="submit" className="w-full mt-6 h-12 text-base font-bold bg-blue-600 hover:bg-blue-700 shadow-sm transition-transform active:scale-[0.98]" disabled={isSubmitting}>
-              {isSubmitting ? <><Loader2 className="mr-2 h-4 w-4 animate-spin"/> Processing...</> : "Add to Pending List"}
+              {isSubmitting ? <><Loader2 className="mr-2 h-4 w-4 animate-spin"/> Checking Security...</> : "Register Visitor"}
             </Button>
           </form>
         </CardContent>
