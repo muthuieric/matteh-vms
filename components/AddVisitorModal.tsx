@@ -7,19 +7,17 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Camera, Loader2, X, UserCircle, ScanLine, AlertOctagon } from "lucide-react";
+import { Camera, Loader2, X, UserCircle, ScanLine } from "lucide-react";
 import PhoneInput from "react-phone-input-2";
 import "react-phone-input-2/lib/style.css";
 import { compressImage } from "@/lib/image-compression";
 
-// Define the structure for custom fields
 type CustomField = {
   id: string;
   label: string;
   active: boolean;
 };
 
-// Define the properties this component accepts
 export interface AddVisitorModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -50,29 +48,26 @@ export default function AddVisitorModal({
     name: "", phone: "", id_number: "", doc_type: "National ID", host_id: "", purpose: "", vehicle_reg: "" 
   });
   
-  // State to hold Custom Fields and Answers
   const [customFields, setCustomFields] = useState<CustomField[]>([]);
   const [customAnswers, setCustomAnswers] = useState<Record<string, string>>({});
 
-  // State for Departments and Hosts
   const [departments, setDepartments] = useState<any[]>([]);
   const [hosts, setHosts] = useState<any[]>([]);
 
-  // State for the custom Searchable Host Dropdown
   const [hostSearchQuery, setHostSearchQuery] = useState("");
   const [isHostDropdownOpen, setIsHostDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Selfie State
   const [selfieFile, setSelfieFile] = useState<File | null>(null);
   const [selfiePreview, setSelfiePreview] = useState<string | null>(null);
   const selfieInputRef = useRef<HTMLInputElement>(null);
 
-  // OCR Camera State
   const [isScanning, setIsScanning] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Close custom dropdown when clicking outside of it
+  // NEW: Terms and Conditions State
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
+
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -83,7 +78,6 @@ export default function AddVisitorModal({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Fetch Custom Fields, Departments, and Hosts when the modal opens
   useEffect(() => {
     const fetchCustomFields = async () => {
       if (!companyId || !isOpen) return;
@@ -122,7 +116,6 @@ export default function AddVisitorModal({
     fetchDepartmentsAndHosts();
   }, [companyId, isOpen]);
 
-  // Compute filtered hosts based on the search query
   const filteredDepartments = departments.map(dept => {
     const deptHosts = hosts.filter(h => 
       h.department_id === dept.id && 
@@ -133,7 +126,6 @@ export default function AddVisitorModal({
 
   if (!isOpen) return null;
 
-  // --- OCR SCANNING LOGIC ---
   const handleImageCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -173,12 +165,16 @@ export default function AddVisitorModal({
     }
   };
 
-  // --- ADD VISITOR LOGIC ---
   const handleAddVisitor = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (!companyId) {
       alert("Could not identify your building assignment. Please refresh the page.");
+      return;
+    }
+
+    if (!agreedToTerms) {
+      alert("You must agree to the Terms and Conditions to register.");
       return;
     }
 
@@ -196,13 +192,12 @@ export default function AddVisitorModal({
     let uploadedPhotoUrl = null;
 
     try {
-      // Format the phone number to ensure consistent checking
       let finalPhone = null;
       if (askPhone && newVisitor.phone) {
         finalPhone = newVisitor.phone.startsWith('+') ? newVisitor.phone : `+${newVisitor.phone}`;
       }
 
-      // --- 1. ROBUST BLACKLIST SECURITY CHECK (USING SECURE API) ---
+      // 1. ROBUST BLACKLIST SECURITY CHECK
       const redFlagsRes = await fetch(`/api/red-flags?company_id=${companyId}`);
       if (redFlagsRes.ok) {
         const redFlagsJson = await redFlagsRes.json();
@@ -214,33 +209,26 @@ export default function AddVisitorModal({
             const matchPhone = askPhone && flag.phone && finalPhone && flag.phone.trim() === finalPhone.trim();
             const matchName = flag.name && newVisitor.name && flag.name.trim().toLowerCase() === newVisitor.name.trim().toLowerCase();
             
-            // 1. If ID or Phone matches exactly, it is definitely the blacklisted person
             if (matchId || matchPhone) return true;
 
-            // 2. If the NAME matches, we must verify they aren't an innocent person with the same name
             if (matchName) {
               const hasDifferentId = askId && newVisitor.id_number && flag.id_number && newVisitor.id_number.trim() !== flag.id_number.trim();
               const hasDifferentPhone = askPhone && finalPhone && flag.phone && finalPhone.trim() !== flag.phone.trim();
-              
-              // If they provided a DIFFERENT ID or Phone, they are an innocent person sharing the same name! Let them through.
               if (hasDifferentId || hasDifferentPhone) return false;
-              
-              // If they didn't provide an ID/Phone to prove otherwise, keep them banned just in case
               return true; 
             }
-
             return false;
           });
 
           if (isBanned) {
             alert(`⚠️ ACCESS DENIED: This visitor is restricted from entering the building.\n\nReason: ${isBanned.reason}`);
             setIsSubmitting(false);
-            return; // Stop the registration process entirely
+            return; 
           }
         }
       }
 
-      // 2. Upload Selfie to Cloudflare R2 if present
+      // 2. Upload Selfie
       if (selfieFile) {
         const compressedFile = await compressImage(selfieFile);
         
@@ -262,7 +250,6 @@ export default function AddVisitorModal({
       }
 
       // 3. Insert Visitor Record
-      // Ensuring gate_id falls back strictly to null if missing or empty string to prevent disappearing UI issues
       const finalGateId = guardGateId && guardGateId !== "" && guardGateId !== "unassigned" ? guardGateId : null;
 
       const { error } = await supabase.from("visitors").insert([
@@ -285,12 +272,13 @@ export default function AddVisitorModal({
 
       if (error) throw error;
 
-      // Reset form and close modal
+      // Reset form
       setNewVisitor({ name: "", phone: "", id_number: "", doc_type: "National ID", host_id: "", purpose: "", vehicle_reg: "" });
       setHostSearchQuery(""); 
       setCustomAnswers({});
       setSelfieFile(null);
       setSelfiePreview(null);
+      setAgreedToTerms(false);
       onClose();
 
     } catch (err: any) {
@@ -369,18 +357,19 @@ export default function AddVisitorModal({
                   </select>
                 </div>
                 <div>
-                  <Label className="mb-1 block font-semibold text-zinc-700">ID / Document No.</Label>
+                  {/* CHANGED: Now required and visually indicated */}
+                  <Label className="mb-1 block font-semibold text-zinc-700">ID / Document No. <span className="text-red-500">*</span></Label>
                   <Input 
+                    required
                     value={newVisitor.id_number} 
                     onChange={(e) => setNewVisitor({...newVisitor, id_number: e.target.value})} 
-                    placeholder="Optional if scanning" 
+                    placeholder="Enter ID number" 
                     className="h-10 bg-zinc-50"
                   />
                 </div>
               </div>
             )}
 
-            {/* SEARCHABLE HOST DROPDOWN */}
             {askHost && (
               <div className="relative" ref={dropdownRef}>
                 <Label className="mb-1 block font-semibold text-zinc-700">Who are you visiting?</Label>
@@ -391,7 +380,7 @@ export default function AddVisitorModal({
                   onChange={(e) => {
                     setHostSearchQuery(e.target.value);
                     setIsHostDropdownOpen(true);
-                    setNewVisitor({ ...newVisitor, host_id: "" }); // Reset ID if they type to enforce selecting from list
+                    setNewVisitor({ ...newVisitor, host_id: "" }); 
                   }}
                   onFocus={() => setIsHostDropdownOpen(true)}
                   className="h-10 bg-zinc-50"
@@ -512,7 +501,28 @@ export default function AddVisitorModal({
               </div>
             )}
 
-            <Button type="submit" className="w-full mt-6 h-12 text-base font-bold bg-blue-600 hover:bg-blue-700 shadow-sm transition-transform active:scale-[0.98]" disabled={isSubmitting}>
+            {/* NEW: Terms and Conditions Checkbox Area */}
+            <div className="space-y-3 pt-4 border-t border-zinc-200">
+              <div className="text-xs text-zinc-500 h-24 overflow-y-auto p-3 bg-zinc-50 border border-zinc-200 rounded-md leading-relaxed shadow-inner">
+                <p className="font-bold mb-1 text-zinc-700">Terms and Conditions of Entry</p>
+                <p>By registering, the visitor agrees to comply with all building security policies and procedures. The visitor consents to the collection, processing, and temporary storage of their personal data (including identification details and facial capture, if applicable) strictly for building security and safety audit purposes. Management reserves the right to deny entry, conduct searches, or escort individuals off the premises for non-compliance. Data is handled in accordance with local data protection laws.</p>
+              </div>
+              <div className="flex items-start gap-2.5">
+                <input
+                  type="checkbox"
+                  id="terms"
+                  required
+                  checked={agreedToTerms}
+                  onChange={(e) => setAgreedToTerms(e.target.checked)}
+                  className="mt-0.5 shrink-0 h-4 w-4 rounded border-zinc-300 text-blue-600 focus:ring-blue-600 cursor-pointer"
+                />
+                <Label htmlFor="terms" className="text-sm text-zinc-700 leading-snug cursor-pointer font-medium">
+                  The visitor has agreed to the Terms and Conditions and consents to data processing. <span className="text-red-500">*</span>
+                </Label>
+              </div>
+            </div>
+
+            <Button type="submit" className="w-full mt-6 h-12 text-base font-bold bg-blue-600 hover:bg-blue-700 shadow-sm transition-transform active:scale-[0.98]" disabled={isSubmitting || !agreedToTerms}>
               {isSubmitting ? <><Loader2 className="mr-2 h-4 w-4 animate-spin"/> Checking Security...</> : "Register Visitor"}
             </Button>
           </form>

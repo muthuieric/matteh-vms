@@ -13,31 +13,27 @@ import PhoneInput from "react-phone-input-2";
 import "react-phone-input-2/lib/style.css";
 import { compressImage } from "@/lib/image-compression";
 
-// Define the structure for custom fields
 type CustomField = {
   id: string;
   label: string;
   active: boolean;
 };
 
-// Define the structure for Departments and Hosts
 type Department = { id: string; name: string };
 type Host = { id: string; name: string; phone: string; email: string; department_id: string };
 
-// We wrap the main component content in a sub-component so we can use useSearchParams safely in a Suspense boundary
 function CheckInFormContent() {
   const params = useParams();
   const searchParams = useSearchParams();
   
   const companyId = params.companyId as string;
-  const urlGateId = searchParams.get("gateId"); // <-- NEW: Grabs the gate ID from the URL
+  const urlGateId = searchParams.get("gateId"); 
 
   const [loading, setLoading] = useState(true);
   const [companyName, setCompanyName] = useState("");
   const [accessDenied, setAccessDenied] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
-  // Company Rules State
   const [rules, setRules] = useState({
     requirePhoto: false,
     askPhone: true,
@@ -47,17 +43,14 @@ function CheckInFormContent() {
     askVehicle: false
   });
   
-  // State for Custom Fields and their Answers
   const [customFields, setCustomFields] = useState<CustomField[]>([]);
   const [customAnswers, setCustomAnswers] = useState<Record<string, string>>({});
 
-  // Form State
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [newVisitor, setNewVisitor] = useState({ 
     name: "", phone: "", id_number: "", doc_type: "National ID", host_id: "", purpose: "", vehicle_reg: "" 
   });
 
-  // State for Departments and Hosts
   const [departments, setDepartments] = useState<Department[]>([]);
   const [hosts, setHosts] = useState<Host[]>([]);
   
@@ -65,7 +58,6 @@ function CheckInFormContent() {
   const [isHostDropdownOpen, setIsHostDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Photo & OCR State
   const [selfieFile, setSelfieFile] = useState<File | null>(null);
   const [selfiePreview, setSelfiePreview] = useState<string | null>(null);
   const selfieInputRef = useRef<HTMLInputElement>(null);
@@ -73,7 +65,9 @@ function CheckInFormContent() {
   const [isScanning, setIsScanning] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Close custom dropdown when clicking outside of it
+  // NEW: Terms and Conditions State
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
+
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -88,7 +82,6 @@ function CheckInFormContent() {
     const fetchCompanyData = async () => {
       if (!companyId) return;
 
-      // Fetch custom_fields and rules from companies table
       const { data: company, error } = await supabase
         .from("companies")
         .select("name, is_locked, subscription_ends_at, require_photo, ask_phone, ask_id, ask_host, ask_purpose, ask_vehicle, custom_fields")
@@ -101,7 +94,6 @@ function CheckInFormContent() {
         return;
       }
 
-      // Check if building subscription is active
       const isExpired = company.subscription_ends_at ? new Date(company.subscription_ends_at) < new Date() : false;
       if (company.is_locked || isExpired) {
         setAccessDenied(true);
@@ -119,13 +111,11 @@ function CheckInFormContent() {
         askVehicle: company.ask_vehicle || false
       });
       
-      // Set active custom fields
       if (company.custom_fields) {
         const activeFields = (company.custom_fields as CustomField[]).filter(f => f.active);
         setCustomFields(activeFields);
       }
 
-      // Fetch Departments and Hosts safely via API
       try {
         const deptsRes = await fetch(`/api/departments?company_id=${companyId}`);
         if (deptsRes.ok) {
@@ -156,7 +146,6 @@ function CheckInFormContent() {
     return { ...dept, hosts: deptHosts };
   }).filter(dept => dept.hosts.length > 0);
 
-  // --- OCR SCANNING LOGIC ---
   const handleImageCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -196,10 +185,14 @@ function CheckInFormContent() {
     }
   };
 
-  // --- ADD VISITOR LOGIC ---
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    if (!agreedToTerms) {
+      alert("You must agree to the Terms and Conditions to proceed.");
+      return;
+    }
+
     if (rules.requirePhoto && !selfieFile) {
       alert("A security photo is required by building management.");
       return;
@@ -214,13 +207,12 @@ function CheckInFormContent() {
     let uploadedPhotoUrl = null;
 
     try {
-      // Format the phone number
       let finalPhone = null;
       if (rules.askPhone && newVisitor.phone) {
         finalPhone = newVisitor.phone.startsWith('+') ? newVisitor.phone : `+${newVisitor.phone}`;
       }
 
-      // --- 1. ROBUST BLACKLIST SECURITY CHECK (USING SECURE API) ---
+      // 1. ROBUST BLACKLIST SECURITY CHECK
       const redFlagsRes = await fetch(`/api/red-flags?company_id=${companyId}`);
       if (redFlagsRes.ok) {
         const redFlagsJson = await redFlagsRes.json();
@@ -241,7 +233,6 @@ function CheckInFormContent() {
               if (hasDifferentId || hasDifferentPhone) return false;
               return true; 
             }
-
             return false;
           });
 
@@ -289,7 +280,7 @@ function CheckInFormContent() {
           status: "pending",
           photo_url: uploadedPhotoUrl,
           custom_data: customAnswers,
-          gate_id: urlGateId || null // <-- NEW: Saves the gate ID from the URL!
+          gate_id: urlGateId || null 
         }
       ]);
 
@@ -353,7 +344,6 @@ function CheckInFormContent() {
       </CardHeader>
       
       <CardContent>
-        {/* HIDDEN FILE INPUT FOR ID CARD */}
         <input 
           type="file" accept="image/*" capture="environment" 
           className="hidden" ref={fileInputRef} onChange={handleImageCapture} 
@@ -413,18 +403,19 @@ function CheckInFormContent() {
                 </select>
               </div>
               <div>
-                <Label className="mb-1 block font-semibold text-zinc-700">ID Number</Label>
+                {/* CHANGED: Now required and visually indicated */}
+                <Label className="mb-1 block font-semibold text-zinc-700">ID Number <span className="text-red-500">*</span></Label>
                 <Input 
+                  required
                   value={newVisitor.id_number} 
                   onChange={(e) => setNewVisitor({...newVisitor, id_number: e.target.value})} 
-                  placeholder="If applicable" 
+                  placeholder="Enter ID Number" 
                   className="h-12 bg-zinc-50"
                 />
               </div>
             </div>
           )}
 
-          {/* SEARCHABLE HOST DROPDOWN */}
           {rules.askHost && (
             <div className="relative" ref={dropdownRef}>
               <Label className="mb-1 block font-semibold text-zinc-700">Who are you visiting?</Label>
@@ -499,7 +490,6 @@ function CheckInFormContent() {
             </div>
           )}
 
-          {/* DYNAMIC CUSTOM FIELDS RENDERING */}
           {customFields.map((field) => (
             <div key={field.id}>
               <Label className="mb-1 block font-semibold text-zinc-700">{field.label}</Label>
@@ -514,10 +504,13 @@ function CheckInFormContent() {
 
           {rules.requirePhoto && (
             <div className="space-y-3 pt-2 pb-2">
-              <Label className="flex justify-between items-center font-semibold text-zinc-700">
-                Security Photo
-                <span className="text-xs text-red-500 font-bold uppercase tracking-wider">* Required</span>
-              </Label>
+              <div>
+                <Label className="flex justify-between items-center font-semibold text-zinc-700">
+                  Security Photo
+                  <span className="text-xs text-red-500 font-bold uppercase tracking-wider">* Required</span>
+                </Label>
+                <p className="text-[11px] text-zinc-500 mt-1 font-medium">Accepted formats: JPG, PNG, WEBP, HEIC</p>
+              </div>
               
               <div className="flex items-center gap-4 bg-zinc-50 p-3 rounded-xl border border-zinc-200">
                 <div className="w-16 h-16 rounded-full bg-white border-2 border-dashed border-zinc-300 flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
@@ -557,7 +550,28 @@ function CheckInFormContent() {
             </div>
           )}
 
-          <Button type="submit" className="w-full mt-6 h-14 text-lg font-bold bg-blue-600 hover:bg-blue-700 shadow-lg transition-transform active:scale-[0.98]" disabled={isSubmitting}>
+          {/* NEW: Terms and Conditions Checkbox Area */}
+          <div className="space-y-3 pt-4 border-t border-zinc-200">
+            <div className="text-xs text-zinc-500 h-24 overflow-y-auto p-3 bg-zinc-50 border border-zinc-200 rounded-md leading-relaxed shadow-inner">
+              <p className="font-bold mb-1 text-zinc-700">Terms and Conditions of Entry</p>
+              <p>By registering, you agree to comply with all building security policies and procedures. You consent to the collection, processing, and temporary storage of your personal data (including identification details and facial capture, if applicable) strictly for building security and safety audit purposes. Management reserves the right to deny entry, conduct searches, or escort individuals off the premises for non-compliance. Your data will be handled in accordance with local data protection laws.</p>
+            </div>
+            <div className="flex items-start gap-2.5">
+              <input
+                type="checkbox"
+                id="terms"
+                required
+                checked={agreedToTerms}
+                onChange={(e) => setAgreedToTerms(e.target.checked)}
+                className="mt-0.5 shrink-0 h-4 w-4 rounded border-zinc-300 text-blue-600 focus:ring-blue-600 cursor-pointer"
+              />
+              <Label htmlFor="terms" className="text-sm text-zinc-700 leading-snug cursor-pointer font-medium">
+                I agree to the Terms and Conditions and consent to the processing of my data. <span className="text-red-500">*</span>
+              </Label>
+            </div>
+          </div>
+
+          <Button type="submit" className="w-full mt-6 h-14 text-lg font-bold bg-blue-600 hover:bg-blue-700 shadow-lg transition-transform active:scale-[0.98]" disabled={isSubmitting || !agreedToTerms}>
             {isSubmitting ? <><Loader2 className="mr-2 h-5 w-5 animate-spin"/> Processing...</> : "Submit Registration"}
           </Button>
         </form>
@@ -566,11 +580,9 @@ function CheckInFormContent() {
   );
 }
 
-// Wrapping the entire page in a Suspense boundary for `useSearchParams()`
 export default function PublicGateCheckInWrapper() {
   return (
     <div className="min-h-screen bg-zinc-50 p-4 py-8 flex items-center justify-center relative overflow-hidden">
-      {/* Ambient Background Elements */}
       <div className="absolute top-[-10%] left-[-10%] h-[300px] w-[300px] rounded-full bg-blue-400/20 blur-[100px] pointer-events-none" />
       <div className="absolute bottom-[-10%] right-[-10%] h-[300px] w-[300px] rounded-full bg-amber-400/20 blur-[100px] pointer-events-none" />
       
