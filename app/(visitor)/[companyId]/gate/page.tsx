@@ -13,7 +13,7 @@ import PhoneInput from "react-phone-input-2";
 import "react-phone-input-2/lib/style.css";
 import { compressImage } from "@/lib/image-compression";
 
-// NEW: Define the structure for custom fields
+// Define the structure for custom fields
 type CustomField = {
   id: string;
   label: string;
@@ -39,15 +39,22 @@ export default function PublicGateCheckIn() {
     askVehicle: false
   });
   
-  // NEW: State for Custom Fields and their Answers
+  // State for Custom Fields and their Answers
   const [customFields, setCustomFields] = useState<CustomField[]>([]);
   const [customAnswers, setCustomAnswers] = useState<Record<string, string>>({});
 
   // Form State
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [newVisitor, setNewVisitor] = useState({ 
-    name: "", phone: "", id_number: "", doc_type: "National ID", host_name: "", purpose: "", vehicle_reg: "" 
+    name: "", phone: "", id_number: "", doc_type: "National ID", host_id: "", purpose: "", vehicle_reg: "" 
   });
+
+  // State for Departments and Hosts (for the searchable dropdown)
+  const [departments, setDepartments] = useState<any[]>([]);
+  const [hosts, setHosts] = useState<any[]>([]);
+  const [hostSearchQuery, setHostSearchQuery] = useState("");
+  const [isHostDropdownOpen, setIsHostDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Photo & OCR State
   const [selfieFile, setSelfieFile] = useState<File | null>(null);
@@ -57,11 +64,22 @@ export default function PublicGateCheckIn() {
   const [isScanning, setIsScanning] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Close custom dropdown when clicking outside of it
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsHostDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   useEffect(() => {
     const fetchCompanyData = async () => {
       if (!companyId) return;
 
-      // UPDATE: Fetch custom_fields from companies table
+      // Fetch custom_fields and rules from companies table
       const { data: company, error } = await supabase
         .from("companies")
         .select("name, is_locked, subscription_ends_at, require_photo, ask_phone, ask_id, ask_host, ask_purpose, ask_vehicle, custom_fields")
@@ -92,10 +110,27 @@ export default function PublicGateCheckIn() {
         askVehicle: company.ask_vehicle || false
       });
       
-      // NEW: Set active custom fields
+      // Set active custom fields
       if (company.custom_fields) {
         const activeFields = (company.custom_fields as CustomField[]).filter(f => f.active);
         setCustomFields(activeFields);
+      }
+
+      // Fetch Departments and Hosts safely via API (bypassing RLS for public users)
+      try {
+        const deptsRes = await fetch(`/api/departments?company_id=${companyId}`);
+        if (deptsRes.ok) {
+          const deptsJson = await deptsRes.json();
+          if (deptsJson.data) setDepartments(deptsJson.data);
+        }
+
+        const hostsRes = await fetch(`/api/hosts?company_id=${companyId}`);
+        if (hostsRes.ok) {
+          const hostsJson = await hostsRes.json();
+          if (hostsJson.data) setHosts(hostsJson.data);
+        }
+      } catch (err) {
+        console.error("Error fetching hosts/departments", err);
       }
 
       setLoading(false);
@@ -103,6 +138,15 @@ export default function PublicGateCheckIn() {
 
     fetchCompanyData();
   }, [companyId]);
+
+  // Compute filtered hosts based on the search query
+  const filteredDepartments = departments.map(dept => {
+    const deptHosts = hosts.filter(h => 
+      h.department_id === dept.id && 
+      h.name.toLowerCase().includes(hostSearchQuery.toLowerCase())
+    );
+    return { ...dept, hosts: deptHosts };
+  }).filter(dept => dept.hosts.length > 0);
 
   // --- OCR SCANNING LOGIC ---
   const handleImageCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -112,7 +156,6 @@ export default function PublicGateCheckIn() {
     setIsScanning(true);
 
     try {
-      // Compress the image before passing it to the OCR reader
       const compressedFile = await compressImage(file);
       const reader = new FileReader();
       reader.readAsDataURL(compressedFile);
@@ -154,13 +197,17 @@ export default function PublicGateCheckIn() {
       return;
     }
 
+    if (rules.askHost && !newVisitor.host_id) {
+      alert("Please select a valid host from the dropdown list.");
+      return;
+    }
+
     setIsSubmitting(true);
     let uploadedPhotoUrl = null;
 
     try {
       // 1. Upload Selfie to Cloudflare R2 if present
       if (selfieFile) {
-        // Compress the security photo before sending it to the server
         const compressedFile = await compressImage(selfieFile);
         
         const formDataPayload = new FormData();
@@ -176,12 +223,11 @@ export default function PublicGateCheckIn() {
         if (uploadData.success) {
           uploadedPhotoUrl = uploadData.url;
         } else {
-          // Changed this to show the EXACT error the backend returns
           throw new Error(uploadData.error || uploadData.message || "Backend rejected the photo for an unknown reason.");
         }
       }
 
-      // Format the phone number (react-phone-input-2 provides digits only, we add the '+')
+      // Format the phone number
       let finalPhone = null;
       if (rules.askPhone && newVisitor.phone) {
         finalPhone = newVisitor.phone.startsWith('+') ? newVisitor.phone : `+${newVisitor.phone}`;
@@ -195,12 +241,13 @@ export default function PublicGateCheckIn() {
           phone: finalPhone,
           document_type: rules.askId ? newVisitor.doc_type : null,
           id_number: rules.askId ? newVisitor.id_number : null,
-          host_name: rules.askHost ? newVisitor.host_name : null,
+          host_id: rules.askHost && newVisitor.host_id ? newVisitor.host_id : null,
+          host_name: rules.askHost && newVisitor.host_id ? hostSearchQuery : null, // Saves exact name string for guards
           purpose: rules.askPurpose ? newVisitor.purpose : null,
           vehicle_reg: rules.askVehicle ? newVisitor.vehicle_reg : null,
           status: "pending",
           photo_url: uploadedPhotoUrl,
-          custom_data: customAnswers // NEW: Save custom answers to the JSONB column
+          custom_data: customAnswers // Save custom answers
         }
       ]);
 
@@ -343,16 +390,55 @@ export default function PublicGateCheckIn() {
               </div>
             )}
 
-            {/* NEW DYNAMIC FIELDS: HOST, PURPOSE, VEHICLE */}
+            {/* SEARCHABLE HOST DROPDOWN */}
             {rules.askHost && (
-              <div>
+              <div className="relative" ref={dropdownRef}>
                 <Label className="mb-1 block font-semibold text-zinc-700">Who are you visiting?</Label>
-                <Input 
-                  value={newVisitor.host_name} 
-                  onChange={(e) => setNewVisitor({...newVisitor, host_name: e.target.value})} 
-                  placeholder="Host's name or department" 
+                <Input
+                  type="text"
+                  placeholder="Type to search for a host..."
+                  value={hostSearchQuery}
+                  onChange={(e) => {
+                    setHostSearchQuery(e.target.value);
+                    setIsHostDropdownOpen(true);
+                    setNewVisitor({ ...newVisitor, host_id: "" }); // Reset ID if they type to enforce selecting from list
+                  }}
+                  onFocus={() => setIsHostDropdownOpen(true)}
                   className="h-12 bg-zinc-50"
+                  autoComplete="off"
                 />
+                
+                {/* Hidden input to enforce standard HTML required validation */}
+                <input type="text" className="hidden" required value={newVisitor.host_id} onChange={() => {}} />
+
+                {isHostDropdownOpen && (
+                  <div className="absolute z-10 w-full mt-1 bg-white border border-zinc-200 rounded-md shadow-xl max-h-60 overflow-y-auto">
+                    {filteredDepartments.length === 0 ? (
+                      <div className="p-4 text-sm text-zinc-500 text-center">No matching hosts found.</div>
+                    ) : (
+                      filteredDepartments.map((dept) => (
+                        <div key={dept.id}>
+                          <div className="px-3 py-2 text-xs font-bold bg-zinc-100/80 text-zinc-500 uppercase tracking-wider sticky top-0 backdrop-blur-sm">
+                            {dept.name}
+                          </div>
+                          {dept.hosts.map((host) => (
+                            <div
+                              key={host.id}
+                              className="px-4 py-3 text-sm text-zinc-900 hover:bg-blue-50 cursor-pointer border-b border-zinc-50 last:border-0 transition-colors"
+                              onClick={() => {
+                                setNewVisitor({ ...newVisitor, host_id: host.id });
+                                setHostSearchQuery(host.name);
+                                setIsHostDropdownOpen(false);
+                              }}
+                            >
+                              <div className="font-medium">{host.name}</div>
+                            </div>
+                          ))}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
@@ -380,7 +466,7 @@ export default function PublicGateCheckIn() {
               </div>
             )}
 
-            {/* NEW: DYNAMIC CUSTOM FIELDS RENDERING */}
+            {/* DYNAMIC CUSTOM FIELDS RENDERING */}
             {customFields.map((field) => (
               <div key={field.id}>
                 <Label className="mb-1 block font-semibold text-zinc-700">{field.label}</Label>
@@ -429,10 +515,10 @@ export default function PublicGateCheckIn() {
                       }} 
                     />
                     <Button 
-                      type="button" variant="outline" className="w-full text-xs h-10 bg-white hover:bg-zinc-100 shadow-sm border-zinc-300 text-zinc-700 font-bold"
+                      type="button" variant="outline" className="w-full text-sm h-12 bg-white hover:bg-zinc-100 shadow-sm border-zinc-300 text-zinc-700 font-bold"
                       onClick={() => selfieInputRef.current?.click()}
                     >
-                      <Camera className="w-4 h-4 mr-2" /> Take Selfie
+                      <Camera className="w-5 h-5 mr-2" /> Take Selfie
                     </Button>
                   </div>
                 </div>
