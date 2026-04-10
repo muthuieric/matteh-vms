@@ -20,6 +20,10 @@ type CustomField = {
   active: boolean;
 };
 
+// ADD THESE TWO TYPES:
+type Department = { id: string; name: string };
+type Host = { id: string; name: string; phone: string; email: string; department_id: string };
+
 export default function PublicGateCheckIn() {
   const params = useParams();
   const companyId = params.companyId as string;
@@ -49,9 +53,10 @@ export default function PublicGateCheckIn() {
     name: "", phone: "", id_number: "", doc_type: "National ID", host_id: "", purpose: "", vehicle_reg: "" 
   });
 
-  // State for Departments and Hosts (for the searchable dropdown)
-  const [departments, setDepartments] = useState<any[]>([]);
-  const [hosts, setHosts] = useState<any[]>([]);
+  // State for Departments and Hosts (REPLACE any[] WITH THE NEW TYPES)
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [hosts, setHosts] = useState<Host[]>([]);
+  
   const [hostSearchQuery, setHostSearchQuery] = useState("");
   const [isHostDropdownOpen, setIsHostDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);

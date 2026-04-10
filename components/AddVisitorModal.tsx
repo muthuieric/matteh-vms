@@ -19,7 +19,8 @@ type CustomField = {
   active: boolean;
 };
 
-type AddVisitorModalProps = {
+// Define the properties this component accepts
+export interface AddVisitorModalProps {
   isOpen: boolean;
   onClose: () => void;
   companyId: string | null;
@@ -29,7 +30,7 @@ type AddVisitorModalProps = {
   askHost?: boolean;
   askPurpose?: boolean;
   askVehicle?: boolean;
-};
+}
 
 export default function AddVisitorModal({
   isOpen,
@@ -126,7 +127,7 @@ export default function AddVisitorModal({
       h.name.toLowerCase().includes(hostSearchQuery.toLowerCase())
     );
     return { ...dept, hosts: deptHosts };
-  }).filter(dept => dept.hosts.length > 0); // Only keep departments that have matching hosts
+  }).filter(dept => dept.hosts.length > 0);
 
   if (!isOpen) return null;
 
@@ -366,7 +367,7 @@ export default function AddVisitorModal({
                           <div className="px-3 py-1.5 text-xs font-bold bg-zinc-100 text-zinc-500 uppercase tracking-wider sticky top-0">
                             {dept.name}
                           </div>
-                          {dept.hosts.map((host) => (
+                          {dept.hosts.map((host: any) => (
                             <div
                               key={host.id}
                               className="px-3 py-2 text-sm text-zinc-900 hover:bg-blue-50 cursor-pointer border-b border-zinc-50 last:border-0"
