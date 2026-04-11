@@ -134,37 +134,36 @@ export default function AddVisitorModal({
 
     try {
       const compressedFile = await compressImage(file);
-      const reader = new FileReader();
-      reader.readAsDataURL(compressedFile);
       
-      reader.onloadend = async () => {
-        const base64data = reader.result;
-        const response = await fetch("/api/ocr", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ imageBase64: base64data }),
-        });
+      // FIX 1: Send as FormData instead of Base64 JSON to match the new backend
+      const formDataPayload = new FormData();
+      formDataPayload.append("file", compressedFile);
 
-        const result = await response.json();
+      const response = await fetch("/api/ocr", {
+        method: "POST",
+        body: formDataPayload,
+      });
 
-        if (result.success && result.data) {
-          setNewVisitor((prev) => ({
-            ...prev,
-            name: result.data.FullName || prev.name,
-            id_number: result.data.IDNumber || prev.id_number,
-          }));
-        } else {
-          alert("Could not read the ID clearly. Please type it manually.");
-        }
-        setIsScanning(false);
-      };
+      const result = await response.json();
+
+      if (result.success && result.data) {
+        setNewVisitor((prev) => ({
+          ...prev,
+          // FIX 2: Use exact keys matching the new Google Cloud Vision route
+          name: result.data.name || prev.name,
+          id_number: result.data.id_number || prev.id_number,
+        }));
+      } else {
+        alert("Could not read the ID clearly. Please type it manually.");
+      }
+      setIsScanning(false);
     } catch (error) {
       console.error(error);
       setIsScanning(false);
       alert("Error scanning ID. Please try manually.");
     }
   };
-
+  
   const handleAddVisitor = async (e: React.FormEvent) => {
     e.preventDefault();
     

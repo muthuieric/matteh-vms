@@ -65,7 +65,6 @@ function CheckInFormContent() {
   const [isScanning, setIsScanning] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // NEW: Terms and Conditions State
   const [agreedToTerms, setAgreedToTerms] = useState(false);
 
   useEffect(() => {
@@ -154,30 +153,27 @@ function CheckInFormContent() {
 
     try {
       const compressedFile = await compressImage(file);
-      const reader = new FileReader();
-      reader.readAsDataURL(compressedFile);
       
-      reader.onloadend = async () => {
-        const base64data = reader.result;
-        const response = await fetch("/api/ocr", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ imageBase64: base64data }),
-        });
+      const formDataPayload = new FormData();
+      formDataPayload.append("file", compressedFile);
 
-        const result = await response.json();
+      const response = await fetch("/api/ocr", {
+        method: "POST",
+        body: formDataPayload,
+      });
 
-        if (result.success && result.data) {
-          setNewVisitor((prev) => ({
-            ...prev,
-            name: result.data.FullName || prev.name,
-            id_number: result.data.IDNumber || prev.id_number,
-          }));
-        } else {
-          alert("Could not read the ID clearly. Please type it manually.");
-        }
-        setIsScanning(false);
-      };
+      const result = await response.json();
+
+      if (result.success && result.data) {
+        setNewVisitor((prev) => ({
+          ...prev,
+          name: result.data.name || prev.name,
+          id_number: result.data.id_number || prev.id_number,
+        }));
+      } else {
+        alert("Could not read the ID clearly. Please type it manually.");
+      }
+      setIsScanning(false);
     } catch (error) {
       console.error(error);
       setIsScanning(false);
@@ -212,7 +208,6 @@ function CheckInFormContent() {
         finalPhone = newVisitor.phone.startsWith('+') ? newVisitor.phone : `+${newVisitor.phone}`;
       }
 
-      // 1. ROBUST BLACKLIST SECURITY CHECK
       const redFlagsRes = await fetch(`/api/red-flags?company_id=${companyId}`);
       if (redFlagsRes.ok) {
         const redFlagsJson = await redFlagsRes.json();
@@ -244,7 +239,6 @@ function CheckInFormContent() {
         }
       }
 
-      // 2. Upload Selfie
       if (selfieFile) {
         const compressedFile = await compressImage(selfieFile);
         
@@ -265,7 +259,6 @@ function CheckInFormContent() {
         }
       }
 
-      // 3. Insert Visitor Record
       const { error } = await supabase.from("visitors").insert([
         {
           company_id: companyId,
@@ -403,7 +396,6 @@ function CheckInFormContent() {
                 </select>
               </div>
               <div>
-                {/* CHANGED: Now required and visually indicated */}
                 <Label className="mb-1 block font-semibold text-zinc-700">ID Number <span className="text-red-500">*</span></Label>
                 <Input 
                   required
@@ -550,7 +542,6 @@ function CheckInFormContent() {
             </div>
           )}
 
-          {/* NEW: Terms and Conditions Checkbox Area */}
           <div className="space-y-3 pt-4 border-t border-zinc-200">
             <div className="text-xs text-zinc-500 h-24 overflow-y-auto p-3 bg-zinc-50 border border-zinc-200 rounded-md leading-relaxed shadow-inner">
               <p className="font-bold mb-1 text-zinc-700">Terms and Conditions of Entry</p>

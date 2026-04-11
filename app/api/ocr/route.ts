@@ -1,87 +1,85 @@
 import { NextResponse } from "next/server";
 
-export async function POST(request: Request) {
+export async function POST(req: Request) {
   try {
-    const { imageBase64 } = await request.json();
+    const formData = await req.formData();
+    const file = formData.get("file") as File;
 
-    if (!imageBase64) {
-      return NextResponse.json({ error: "No image provided" }, { status: 400 });
+    if (!file) {
+      return NextResponse.json({ error: "No image file provided" }, { status: 400 });
     }
 
-    // Look for OpenAI key in your .env.local file
-    const openAiKey = process.env.OPENAI_API_KEY;
+    // Convert the uploaded file to Base64 for the free OCR API
+    const arrayBuffer = await file.arrayBuffer();
+    const base64Image = Buffer.from(arrayBuffer).toString("base64");
+    const dataUrl = `data:${file.type};base64,${base64Image}`;
 
-    // TEST MODE: If you haven't added your API key yet, simulate a successful scan
-    if (!openAiKey) {
-      console.log("No OpenAI key found. Simulating ID scan...");
-      await new Promise(r => setTimeout(r, 1500)); // 1.5s delay
-      return NextResponse.json({
-        success: true,
-        data: { FullName: "JOHN DOE", IDNumber: "12345678" }
-      });
-    }
+    // =========================================================================
+    // USING OCR.SPACE (100% Free, No Credit Card Required)
+    // =========================================================================
+    const ocrFormData = new FormData();
+    ocrFormData.append("base64Image", dataUrl);
+    ocrFormData.append("language", "eng");
+    ocrFormData.append("isOverlayRequired", "false");
 
-    // --- REAL OPENAI VISION IMPLEMENTATION ---
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    const response = await fetch("https://api.ocr.space/parse/image", {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${openAiKey}`
+        // "helloworld" is their public free key, but you can get your own
+        // free key instantly at https://ocr.space/ocrapi if this one gets rate-limited
+        "apikey": "helloworld", 
       },
-      body: JSON.stringify({
-        model: "gpt-4o-mini", // The cheapest and fastest vision model
-        messages: [
-          {
-            role: "system",
-            content: "You are an ID card data extractor. Extract the person's full name and their ID number from the provided image. Respond ONLY with a valid JSON object in this exact format, with no markdown formatting or other text: {\"FullName\": \"extracted name\", \"IDNumber\": \"extracted number\"}."
-          },
-          {
-            role: "user",
-            content: [
-              {
-                type: "image_url",
-                image_url: {
-                  url: imageBase64,
-                  detail: "high" // Ensures text is readable
-                }
-              }
-            ]
-          }
-        ],
-        max_tokens: 150,
-        temperature: 0.0, // Force it to be factual, not creative
-      })
+      body: ocrFormData as any,
     });
 
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error("OpenAI Error:", errText);
-      throw new Error("Failed to process image with OpenAI");
-    }
-
     const result = await response.json();
-    const content = result.choices[0].message.content.trim();
 
-    // Parse the JSON string OpenAI returned
-    let extractedData;
-    try {
-      extractedData = JSON.parse(content);
-    } catch (e) {
-      // Fallback in case OpenAI accidentally wraps it in markdown blocks
-      const cleaned = content.replace(/```json/g, "").replace(/```/g, "").trim();
-      extractedData = JSON.parse(cleaned);
+    if (!result || result.IsErroredOnProcessing || !result.ParsedResults || result.ParsedResults.length === 0) {
+      console.error("[OCR] API Error:", result);
+      return NextResponse.json({ error: "OCR Processing Failed" }, { status: 400 });
     }
 
-    return NextResponse.json({
-      success: true,
-      data: extractedData
+    const fullText = result.ParsedResults[0].ParsedText || "";
+    console.log("[OCR] Extracted Raw Text:", fullText);
+
+    // =========================================================================
+    // PARSING LOGIC: Extract ID Number and Name
+    // =========================================================================
+    
+    // 1. Extract ID Number (Assuming standard 7 or 8 digit ID)
+    const idRegex = /\b\d{7,8}\b/;
+    const idMatch = fullText.match(idRegex);
+    const extractedId = idMatch ? idMatch[0] : "";
+
+    // 2. Extract Name
+    let extractedName = "";
+    const lines = fullText.split('\n').map((line: string) => line.trim()).filter((line: string) => line.length > 0);
+    
+    for (let i = 0; i < lines.length; i++) {
+      const upperLine = lines[i].toUpperCase();
+      
+      if (upperLine.includes("FULL NAMES") || upperLine.includes("NAMES") || upperLine.includes("NAME")) {
+        if (upperLine.includes(":") && upperLine.split(":")[1].trim().length > 0) {
+          extractedName = lines[i].split(":")[1].trim();
+          break;
+        } else if (lines[i + 1]) {
+          extractedName = lines[i + 1].replace(/[^a-zA-Z\s]/g, '').trim();
+          break;
+        }
+      }
+    }
+
+    return NextResponse.json({ 
+      success: true, 
+      data: {
+        name: extractedName,
+        id_number: extractedId
+      },
+      rawText: fullText 
     });
 
   } catch (error: any) {
-    console.error("OCR API Error:", error.message || error);
-    return NextResponse.json(
-      { error: "Failed to process ID card", details: error.message },
-      { status: 500 }
-    );
+    console.error("[OCR] Process Error:", error);
+    return NextResponse.json({ error: error.message || "Failed to process ID image" }, { status: 500 });
   }
 }
