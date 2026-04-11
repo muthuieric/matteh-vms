@@ -259,6 +259,7 @@ function CheckInFormContent() {
         }
       }
 
+      // 1. Submit Visitor to Supabase Database
       const { error } = await supabase.from("visitors").insert([
         {
           company_id: companyId,
@@ -279,6 +280,24 @@ function CheckInFormContent() {
 
       if (error) throw error;
 
+     // 2. TRIGGER EMAIL NOTIFICATION TO HOST (Fire-and-forget so UI doesn't freeze)
+     if (rules.askHost && newVisitor.host_id) {
+      const selectedHost = hosts.find((h) => h.id === newVisitor.host_id);
+      if (selectedHost && selectedHost.email) {
+        fetch("/api/notify-host", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            hostEmail: selectedHost.email,
+            hostName: selectedHost.name,
+            visitorName: newVisitor.name,
+            visitorPhone: finalPhone, // <-- We added this line!
+            companyName: companyName,
+            purpose: newVisitor.purpose || "Meeting/Visit"
+          }),
+        }).catch((err) => console.error("Failed to trigger host email:", err));
+      }
+    }
       setSubmitted(true);
 
     } catch (err: any) {
@@ -321,7 +340,7 @@ function CheckInFormContent() {
           <CheckCircle2 className="w-20 h-20 text-green-500 mx-auto mb-6" />
           <CardTitle className="text-2xl font-black text-zinc-900 tracking-tight mb-2">Registration Sent!</CardTitle>
           <p className="text-zinc-500 font-medium leading-relaxed">
-            Your details have been securely transmitted. <strong className="text-zinc-900">Please wait for the security guard to approve your entry.</strong>
+            Your details have been securely transmitted to the security desk. <strong className="text-zinc-900">Please wait for the guard to approve your entry.</strong>
           </p>
         </Card>
       </div>
@@ -364,7 +383,7 @@ function CheckInFormContent() {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <Label className="mb-1 block font-semibold text-zinc-700">Full Name <span className="text-red-500">*</span></Label>
-            <Input required value={newVisitor.name} onChange={(e) => setNewVisitor({...newVisitor, name: e.target.value})} placeholder="e.g. John Doe" className="h-12 bg-zinc-50" />
+            <Input required value={newVisitor.name} onChange={(e) => setNewVisitor({...newVisitor, name: e.target.value})} placeholder="e.g. John Doe" className="h-12 bg-zinc-50" autoComplete="name" />
           </div>
 
           {rules.askPhone && (
@@ -374,13 +393,18 @@ function CheckInFormContent() {
                 country="ke" 
                 value={newVisitor.phone} 
                 onChange={phone => setNewVisitor({ ...newVisitor, phone })} 
+                inputProps={{
+                  name: 'phone',
+                  required: true,
+                  autoComplete: 'tel' 
+                }}
                 inputClass="!w-full !h-12 !text-zinc-900 !bg-zinc-50 !rounded-md !border !border-zinc-300 focus:!ring-2 focus:!ring-blue-600 px-3" 
                 containerClass="w-full" 
                 buttonClass="!border-zinc-300 !bg-zinc-50 !rounded-l-md hover:!bg-zinc-100"
               />
             </div>
           )}
-
+             
           {rules.askId && (
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -399,10 +423,12 @@ function CheckInFormContent() {
                 <Label className="mb-1 block font-semibold text-zinc-700">ID Number <span className="text-red-500">*</span></Label>
                 <Input 
                   required
+                  name="id_number"
                   value={newVisitor.id_number} 
                   onChange={(e) => setNewVisitor({...newVisitor, id_number: e.target.value})} 
                   placeholder="Enter ID Number" 
                   className="h-12 bg-zinc-50"
+                  autoComplete="on"
                 />
               </div>
             </div>
@@ -478,6 +504,7 @@ function CheckInFormContent() {
                 onChange={(e) => setNewVisitor({...newVisitor, vehicle_reg: e.target.value})} 
                 placeholder="e.g. KCA 123A (Leave blank if walk-in)" 
                 className="h-12 bg-zinc-50 uppercase"
+                autoComplete="on"
               />
             </div>
           )}
