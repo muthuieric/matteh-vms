@@ -366,9 +366,11 @@ export default function GuardDashboard() {
             <Button variant="outline" onClick={() => setShowQrModal(true)} className="flex-1 sm:flex-initial bg-white hover:bg-zinc-100 text-zinc-900 border-zinc-200 shadow-sm">
               <QrCode className="w-4 h-4 mr-2" /> Show QR
             </Button>
-            <Button onClick={() => setShowAddModal(true)} className="flex-1 sm:flex-initial bg-blue-600 hover:bg-blue-700 shadow-md">
+            {/* Added the 'hidden' class here to hide it without commenting or removing the code */}
+            <Button onClick={() => setShowAddModal(true)} className="hidden flex-1 sm:flex-initial bg-blue-600 hover:bg-blue-700 shadow-md">
               <UserPlus className="w-4 h-4 mr-2 hidden sm:inline-block" /> + New Visitor
             </Button>
+
           </div>
         </div>
 
