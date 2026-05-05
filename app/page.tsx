@@ -39,14 +39,17 @@ export default function LandingPage() {
       <div className="absolute top-[-10%] left-[-10%] h-[500px] w-[500px] rounded-full bg-zinc-300/20 blur-[100px] pointer-events-none" />
       <div className="absolute bottom-[-10%] right-[-10%] h-[500px] w-[500px] rounded-full bg-zinc-400/20 blur-[100px] pointer-events-none" />
 
-      {/* --- NAVBAR (SIGN IN RESTORED) --- */}
+      {/* --- NAVBAR --- */}
       <nav className="relative z-50 container mx-auto px-6 py-6 flex justify-between items-center max-w-7xl">
         <div className="flex items-center">
           <span className="text-xl md:text-2xl font-black tracking-tighter text-zinc-900">matteh-vms</span>
         </div>
-        <div>
-          <Link href="/login">
-            <Button variant="outline" className="h-10 px-6 rounded-xl text-sm">Sign In</Button>
+        <div className="flex items-center gap-4">
+          <Link href="/login" className="text-sm font-bold text-zinc-600 hover:text-zinc-900 transition-colors hidden sm:block">
+            Sign In
+          </Link>
+          <Link href="/register">
+            <Button variant="primary" className="h-10 px-5 rounded-xl text-sm shadow-md">Register</Button>
           </Link>
         </div>
       </nav>
@@ -63,11 +66,11 @@ export default function LandingPage() {
         </p>
         
         <div className="flex flex-col sm:flex-row justify-center items-center gap-4 animate-in fade-in slide-in-from-bottom-10 duration-700 delay-300 w-full sm:w-auto">
-          <a href="https://wa.me/254706123513?text=Hi,%20I'm%20interested%20in%20setting%20up%20matteh-vms%20for%20my%20building." target="_blank" rel="noopener noreferrer" className="w-full sm:w-auto">
+          <Link href="/register" className="w-full sm:w-auto">
             <Button className="h-14 px-8 text-lg w-full rounded-xl">
               Start Free Trial <ArrowRight className="ml-2 w-5 h-5" />
             </Button>
-          </a>
+          </Link>
           <p className="text-xs font-semibold text-zinc-400 mt-2 sm:mt-0 sm:ml-4">No hardware required.<br/>Setup in 5 minutes.</p>
         </div>
 
@@ -259,19 +262,7 @@ export default function LandingPage() {
           </div>
         </div>
 
-        {/* --- FINAL CTA SECTION --- */}
-        <div className="mt-32 w-full bg-zinc-900 rounded-[3rem] p-12 md:p-20 text-center relative overflow-hidden shadow-2xl">
-           <div className="absolute top-[-50%] left-[50%] -translate-x-1/2 w-full h-full bg-zinc-800 rounded-[100%] blur-[120px] pointer-events-none"></div>
-           <div className="relative z-10">
-             <h2 className="text-4xl md:text-5xl font-black text-white mb-6">Ready to upgrade your building's security?</h2>
-             <p className="text-zinc-400 font-medium text-lg mb-10 max-w-2xl mx-auto">Join the hundreds of modern facilities that have permanently replaced their paper logbooks with matteh-vms.</p>
-             <a href="https://wa.me/254706123513?text=Hi,%20I'd%20like%20to%20start%20my%20free%20trial." target="_blank" rel="noopener noreferrer">
-                <Button className="h-14 px-10 text-lg bg-white text-zinc-900 hover:bg-zinc-100 shadow-xl rounded-xl">
-                  Start Your Free Trial
-                </Button>
-             </a>
-           </div>
-        </div>
+       
 
       </main>
 

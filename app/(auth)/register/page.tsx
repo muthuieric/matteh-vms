@@ -24,8 +24,16 @@ export default function RegisterPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    // 1. Check if passwords match
     if (formData.password !== formData.confirmPassword) {
       alert("Passwords do not match. Please try again.");
+      return;
+    }
+
+    // 2. ENHANCED SECURITY: Check password strength
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+    if (!passwordRegex.test(formData.password)) {
+      alert("Weak Password: It must be at least 8 characters long and include an uppercase letter, a lowercase letter, a number, and a special character.");
       return;
     }
 
@@ -172,8 +180,8 @@ export default function RegisterPage() {
                   <Input 
                     required 
                     type="password" 
-                    minLength={6}
-                    placeholder="Minimum 6 characters" 
+                    minLength={8}
+                    placeholder="Min 8 chars, 1 uppercase, 1 symbol" 
                     className="pl-10 h-11 bg-zinc-50 border-zinc-200 focus:bg-white focus:ring-2 focus:ring-zinc-900"
                     value={formData.password}
                     onChange={(e) => setFormData({...formData, password: e.target.value})}
@@ -188,7 +196,7 @@ export default function RegisterPage() {
                   <Input 
                     required 
                     type="password" 
-                    minLength={6}
+                    minLength={8}
                     placeholder="Retype password" 
                     className="pl-10 h-11 bg-zinc-50 border-zinc-200 focus:bg-white focus:ring-2 focus:ring-zinc-900"
                     value={formData.confirmPassword}
