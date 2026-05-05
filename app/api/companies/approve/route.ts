@@ -2,15 +2,19 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { Resend } from "resend";
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
-const resend = new Resend(process.env.RESEND_API_KEY!);
-
+// It is safer to initialize Supabase inside the function as well to prevent build crashes!
 export async function POST(request: Request) {
   try {
+    // --- THE FIX: We moved these INSIDE the POST function ---
+    // Now Vercel's build scanner will completely ignore them during deployment!
+    const supabaseAdmin = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL || "dummy_url",
+      process.env.SUPABASE_SERVICE_ROLE_KEY || "dummy_key"
+    );
+    
+    const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy");
+    // --------------------------------------------------------
+
     const { companyId } = await request.json();
 
     // 1. Get the company details so we know who to email
@@ -39,7 +43,6 @@ export async function POST(request: Request) {
     if (updateError) throw updateError;
 
     // 4. Send the Approval Email via Resend
-    // Note: If you don't have a custom domain on Resend yet, keep the 'from' email as 'onboarding@resend.dev'
     if (company.contact_email) {
       await resend.emails.send({
         from: "VMS Portal <onboarding@resend.dev>", 
