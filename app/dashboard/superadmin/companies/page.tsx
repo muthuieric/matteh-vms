@@ -7,11 +7,15 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Plus, X, Eye, Lock, Unlock, UserPlus, Building2, Loader2, Search, CalendarDays, Clock, LogIn, LogOut } from "lucide-react";
+import { Plus, X, Eye, Lock, Unlock, UserPlus, Building2, Loader2, Search, CalendarDays, Clock, LogIn, LogOut, CheckCircle, Mail, Phone, User, MapPin } from "lucide-react";
 
 type Company = {
   id: string;
   name: string;
+  address?: string;
+  contact_name?: string;
+  contact_email?: string;
+  contact_phone?: string;
   created_at: string;
   subscription_status: string;
   is_locked: boolean;
@@ -22,19 +26,16 @@ export default function ManageCompaniesPage() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
 
-  // Modals
   const [showAddModal, setShowAddModal] = useState(false);
   const [newCompanyName, setNewCompanyName] = useState("");
   const [planType, setPlanType] = useState<"none" | "trial_1" | "trial_2">("trial_1");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Admin Creation Modal State
   const [showAdminModal, setShowAdminModal] = useState(false);
   const [selectedCompanyId, setSelectedCompanyId] = useState("");
   const [adminForm, setAdminForm] = useState({ fullName: "", email: "", password: "" });
   const [isCreatingAdmin, setIsCreatingAdmin] = useState(false);
 
-  // View Data Modal State (Enhanced Analytics)
   const [showVisitorsModal, setShowVisitorsModal] = useState(false);
   const [visitorStats, setVisitorStats] = useState({ total: 0, inside: 0, departed: 0, pending: 0 });
   const [loadingVisitors, setLoadingVisitors] = useState(false);
@@ -59,7 +60,7 @@ export default function ManageCompaniesPage() {
 
     setCompanies(formattedCompanies);
     setLoading(false);
-  };
+  };  
 
   const handleCreateCompany = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -67,13 +68,12 @@ export default function ManageCompaniesPage() {
     
     let status = "unpaid";
     let endsAt = null;
-    let startLocked = true; // Default to explicitly locked if "No Trial"
+    let startLocked = true; 
 
     if (planType === "trial_1" || planType === "trial_2") {
       status = "trial";
-      startLocked = false; // Unlock if they selected a trial
+      startLocked = false; 
       const expiryDate = new Date();
-      // Add 1 or 2 months to today's date
       const monthsToAdd = planType === "trial_1" ? 1 : 2;
       expiryDate.setMonth(expiryDate.getMonth() + monthsToAdd);
       endsAt = expiryDate.toISOString();
@@ -129,12 +129,9 @@ export default function ManageCompaniesPage() {
           setShowAdminModal(false);
         }
       } else {
-        const textResponse = await response.text();
-        console.error("Server returned non-JSON response:", textResponse);
-        alert(`Server Error (${response.status}): Please ensure the 'app/api/admins/route.ts' file exists and your Service Role Key is in .env.local.`);
+        alert(`Server Error (${response.status})`);
       }
     } catch (error: any) {
-      console.error("Network Error:", error);
       alert(`Network/Connection failed: ${error.message}`);
     } finally {
       setIsCreatingAdmin(false);
@@ -146,12 +143,11 @@ export default function ManageCompaniesPage() {
     setShowVisitorsModal(true);
     setLoadingVisitors(true);
 
-    // Fetch visitor statuses to calculate a quick analytics snapshot
     const { data, error } = await supabase
       .from("visitors")
       .select("status")
       .eq("company_id", companyId);
-
+      
     if (error) {
       console.error("Error fetching stats:", error);
       setVisitorStats({ total: 0, inside: 0, departed: 0, pending: 0 });
@@ -163,7 +159,6 @@ export default function ManageCompaniesPage() {
         pending: data.filter(v => v.status === "pending").length,
       });
     }
-    
     setLoadingVisitors(false);
   };
 
@@ -177,21 +172,44 @@ export default function ManageCompaniesPage() {
       .eq("id", companyId);
 
     if (error) {
-      console.error("Lock Update Error:", error);
       alert(`Failed to update lock status: ${error.message}`);
     } else {
       fetchCompanies();
     }
   };
 
+  const approveCompany = async (companyId: string) => {
+    if (!window.confirm("Are you sure you want to approve this company and start their 1-month free trial?")) return;
+
+    try {
+      const response = await fetch("/api/companies/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ companyId }),
+      });
+
+      const data = await response.json();
+
+      if (data.error) {
+        alert(`Failed to approve company: ${data.error}`);
+      } else {
+        alert("Company approved and notification email sent!");
+        fetchCompanies();
+      }
+    } catch (error) {
+      console.error("Network Error:", error);
+      alert("Failed to connect to approval service.");
+    }
+  };
+
   const filteredCompanies = companies.filter(c => 
-    c.name.toLowerCase().includes(searchTerm.toLowerCase())
+    c.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    (c.contact_email && c.contact_email.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
   return (
-    <div className="p-4 md:p-6 lg:p-10 max-w-6xl mx-auto space-y-6 md:space-y-8">
+    <div className="p-4 md:p-6 lg:p-10 max-w-7xl mx-auto space-y-6 md:space-y-8">
       
-      {/* Header Section */}
       <div className="border-b border-zinc-200 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="p-3 bg-indigo-100 text-indigo-700 rounded-lg shrink-0">
@@ -205,20 +223,18 @@ export default function ManageCompaniesPage() {
         <Button onClick={() => setShowAddModal(true)} className="bg-zinc-900 hover:bg-zinc-800 text-white w-full sm:w-auto shadow-sm">
           <Plus className="mr-2 h-4 w-4" /> New Company
         </Button>
-      </div>
-
+      </div>  
+      
       <Card className="shadow-sm border-zinc-200 bg-white/90 backdrop-blur-sm overflow-hidden">
         <CardHeader className="pb-4 border-b border-zinc-200/60 mb-2 space-y-5">
           <div>
             <CardTitle>Registered Buildings/Companies</CardTitle>
             <CardDescription>All organizations currently using your platform.</CardDescription>
           </div>
-
-          {/* SEARCH BAR */}
           <div className="relative w-full md:max-w-sm">
             <Search className="absolute left-3 top-2.5 h-4 w-4 text-zinc-400" />
             <Input 
-              placeholder="Search company name..." 
+              placeholder="Search by company or email..." 
               className="pl-9 bg-white/80 border-zinc-200 focus:ring-indigo-500 w-full"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -247,12 +263,13 @@ export default function ManageCompaniesPage() {
             </div>
           ) : (
             <>
-              {/* --- DESKTOP VIEW (TABLE) --- */}
+              {/* --- DESKTOP VIEW --- */}
               <div className="hidden md:block">
                 <Table>
                   <TableHeader className="bg-zinc-50/80">
                     <TableRow>
-                      <TableHead className="pl-6 py-4 text-zinc-600 whitespace-nowrap">Company Name</TableHead>
+                      <TableHead className="pl-6 py-4 text-zinc-600 whitespace-nowrap">Company Info</TableHead>
+                      <TableHead className="py-4 text-zinc-600 whitespace-nowrap">Contact Details</TableHead>
                       <TableHead className="text-zinc-600 whitespace-nowrap">Status</TableHead>
                       <TableHead className="text-zinc-600 whitespace-nowrap">Date Added</TableHead>
                       <TableHead className="pr-6 text-right text-zinc-600 whitespace-nowrap">Actions</TableHead>
@@ -261,44 +278,82 @@ export default function ManageCompaniesPage() {
                   <TableBody>
                     {filteredCompanies.map((company) => (
                       <TableRow key={company.id} className="hover:bg-zinc-50/80 transition-colors">
-                        <TableCell className="pl-6 font-semibold text-zinc-900 whitespace-nowrap">
-                          <div className="flex items-center gap-2">
-                            <Building2 className="w-4 h-4 text-zinc-400 shrink-0" />
-                            <span className="truncate max-w-[250px]">{company.name}</span>
-                            {company.is_locked && (
-                              <span title="Account Locked">
-                                <Lock className="inline h-3.5 w-3.5 text-red-600 shrink-0" />
-                              </span>
-                            )}
+                        
+                        <TableCell className="pl-6 whitespace-nowrap">
+                          <div className="flex items-center gap-3">
+                            <div className="bg-zinc-100 p-2 rounded-md border border-zinc-200 shrink-0">
+                               <Building2 className="w-5 h-5 text-zinc-500" />
+                            </div>
+                            <div>
+                              <div className="font-bold text-zinc-900 flex items-center gap-2">
+                                <span className="truncate max-w-[200px]">{company.name}</span>
+                                {company.is_locked && (
+                                  <span title="Account Locked"><Lock className="inline h-3.5 w-3.5 text-red-600 shrink-0" /></span>
+                                )}
+                              </div>
+                              <div className="text-xs text-zinc-500 truncate max-w-[200px] flex items-center gap-1 mt-0.5">
+                                <MapPin className="w-3 h-3" /> {company.address || "No address provided"}
+                              </div>
+                            </div>
                           </div>
                         </TableCell>
+
+                        {/* NEW CONTACT DETAILS COLUMN */}
+                        <TableCell className="whitespace-nowrap">
+                          <div className="space-y-1">
+                            <div className="text-sm font-semibold text-zinc-800 flex items-center gap-1.5">
+                              <User className="w-3.5 h-3.5 text-zinc-400" />
+                              {company.contact_name || "N/A"}
+                            </div>
+                            <div className="text-xs text-zinc-500 flex items-center gap-1.5">
+                              <Mail className="w-3.5 h-3.5 text-zinc-400" />
+                              {company.contact_email || "N/A"}
+                            </div>
+                            <div className="text-xs text-zinc-500 flex items-center gap-1.5">
+                              <Phone className="w-3.5 h-3.5 text-zinc-400" />
+                              {company.contact_phone || "N/A"}
+                            </div>
+                          </div>
+                        </TableCell>
+
                         <TableCell className="whitespace-nowrap">
                           <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold border ${
+                            company.subscription_status === 'pending_approval' ? 'bg-purple-50 text-purple-700 border-purple-200' : 
                             company.subscription_status === 'paid' ? 'bg-green-50 text-green-700 border-green-200' : 
                             company.subscription_status === 'trial' ? 'bg-amber-50 text-amber-700 border-amber-200' : 
                             'bg-red-50 text-red-700 border-red-200'
                           }`}>
-                            {company.subscription_status.toUpperCase()}
+                            {company.subscription_status === 'pending_approval' ? 'PENDING APPROVAL' : company.subscription_status.toUpperCase()}
                           </span>
                         </TableCell>
+                        
                         <TableCell className="text-sm text-zinc-600 whitespace-nowrap">
                           {new Date(company.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
                         </TableCell>
-                        <TableCell className="pr-6 text-right space-x-2 whitespace-nowrap">
-                          <Button size="sm" variant="outline" className="text-blue-600 border-blue-200 hover:bg-blue-50 bg-white" onClick={() => openAdminModal(company.id)}>
-                            <UserPlus className="h-4 w-4 mr-1" /> Add Admin
-                          </Button>
-                          <Button size="sm" variant="outline" className="text-zinc-700 border-zinc-200 hover:bg-zinc-50 bg-white" onClick={() => viewCompanyVisitors(company.id, company.name)}>
-                            <Eye className="h-4 w-4 mr-1" /> View Data
-                          </Button>
-                          <Button 
-                            size="sm" 
-                            variant={company.is_locked ? "default" : "destructive"} 
-                            className={company.is_locked ? "bg-zinc-800 hover:bg-zinc-900 text-white" : "bg-red-50 hover:bg-red-100 text-red-600 border border-red-200"}
-                            onClick={() => toggleCompanyLock(company.id, company.is_locked)}
-                          >
-                            {company.is_locked ? <><Unlock className="h-4 w-4 mr-1"/> Unlock</> : <><Lock className="h-4 w-4 mr-1"/> Lock</>}
-                          </Button>
+                        
+                        <TableCell className="pr-6 text-right space-x-2 whitespace-nowrap flex justify-end items-center h-full pt-4">
+                          {company.subscription_status === 'pending_approval' ? (
+                            <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white font-bold" onClick={() => approveCompany(company.id)}>
+                              <CheckCircle className="h-4 w-4 mr-1" /> Approve & Start Trial
+                            </Button>
+                          ) : (
+                            <>
+                              <Button size="sm" variant="outline" className="text-blue-600 border-blue-200 hover:bg-blue-50 bg-white" onClick={() => openAdminModal(company.id)}>
+                                <UserPlus className="h-4 w-4 mr-1" /> Add Admin
+                              </Button>
+                              <Button size="sm" variant="outline" className="text-zinc-700 border-zinc-200 hover:bg-zinc-50 bg-white" onClick={() => viewCompanyVisitors(company.id, company.name)}>
+                                <Eye className="h-4 w-4 mr-1" /> View Data
+                              </Button>
+                              <Button 
+                                size="sm" 
+                                variant={company.is_locked ? "default" : "destructive"} 
+                                className={company.is_locked ? "bg-zinc-800 hover:bg-zinc-900 text-white" : "bg-red-50 hover:bg-red-100 text-red-600 border border-red-200"}
+                                onClick={() => toggleCompanyLock(company.id, company.is_locked)}
+                              >
+                                {company.is_locked ? <><Unlock className="h-4 w-4 mr-1"/> Unlock</> : <><Lock className="h-4 w-4 mr-1"/> Lock</>}
+                              </Button>
+                            </>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -306,7 +361,7 @@ export default function ManageCompaniesPage() {
                 </Table>
               </div>
 
-              {/* --- MOBILE VIEW (STACKED CARDS) --- */}
+              {/* --- MOBILE VIEW --- */}
               <div className="md:hidden divide-y divide-zinc-100">
                 {filteredCompanies.map((company) => (
                   <div key={company.id} className="p-4 space-y-4 hover:bg-zinc-50/50 transition-colors">
@@ -314,45 +369,73 @@ export default function ManageCompaniesPage() {
                     <div className="flex justify-between items-start gap-2">
                       <div className="font-semibold text-zinc-900 flex items-start gap-2 leading-tight">
                         <Building2 className="w-4 h-4 text-zinc-400 shrink-0 mt-0.5" />
-                        <span className="line-clamp-2">{company.name}</span>
+                        <div>
+                          <span className="line-clamp-2">{company.name}</span>
+                          <span className="text-[10px] font-normal text-zinc-500 block mt-0.5 flex items-center gap-1">
+                            <MapPin className="w-2.5 h-2.5" /> {company.address || "No address"}
+                          </span>
+                        </div>
                         {company.is_locked && (
                           <span title="Account Locked">
                             <Lock className="inline h-3.5 w-3.5 text-red-600 shrink-0 mt-0.5" />
                           </span>
-                        )}
+                        )}      
                       </div>
                       <div>
                         <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider border ${
+                          company.subscription_status === 'pending_approval' ? 'bg-purple-50 text-purple-700 border-purple-200' : 
                           company.subscription_status === 'paid' ? 'bg-green-50 text-green-700 border-green-200' : 
                           company.subscription_status === 'trial' ? 'bg-amber-50 text-amber-700 border-amber-200' : 
                           'bg-red-50 text-red-700 border-red-200'
                         }`}>
-                          {company.subscription_status}
+                          {company.subscription_status === 'pending_approval' ? 'PENDING' : company.subscription_status}
                         </span>
                       </div>
                     </div>
 
-                    <div className="flex items-center text-sm text-zinc-500 gap-1.5">
-                      <CalendarDays className="w-3.5 h-3.5 shrink-0" />
-                      Added: {new Date(company.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                    <div className="bg-zinc-50 p-3 rounded-lg border border-zinc-100 space-y-1.5">
+                      <div className="text-xs font-semibold text-zinc-800 flex items-center gap-1.5">
+                        <User className="w-3.5 h-3.5 text-zinc-400" />
+                        {company.contact_name || "N/A"}
+                      </div>
+                      <div className="text-xs text-zinc-500 flex items-center gap-1.5">
+                        <Mail className="w-3.5 h-3.5 text-zinc-400" />
+                        {company.contact_email || "N/A"}
+                      </div>
+                      <div className="text-xs text-zinc-500 flex items-center gap-1.5">
+                        <Phone className="w-3.5 h-3.5 text-zinc-400" />
+                        {company.contact_phone || "N/A"}
+                      </div>
                     </div>
 
-                    {/* Mobile Action Buttons */}
+                    <div className="flex items-center text-xs text-zinc-500 gap-1.5">
+                      <CalendarDays className="w-3.5 h-3.5 shrink-0" />
+                      Applied: {new Date(company.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                    </div>
+
                     <div className="flex flex-wrap gap-2 pt-2 border-t border-zinc-100">
-                      <Button size="sm" variant="outline" className="flex-1 text-blue-600 border-blue-200 hover:bg-blue-50 bg-white min-w-[120px]" onClick={() => openAdminModal(company.id)}>
-                        <UserPlus className="h-4 w-4 mr-1" /> Add Admin
-                      </Button>
-                      <Button size="sm" variant="outline" className="flex-1 text-zinc-700 border-zinc-200 hover:bg-zinc-50 bg-white min-w-[120px]" onClick={() => viewCompanyVisitors(company.id, company.name)}>
-                        <Eye className="h-4 w-4 mr-1" /> View Data
-                      </Button>
-                      <Button 
-                        size="sm" 
-                        variant={company.is_locked ? "default" : "destructive"} 
-                        className={`w-full ${company.is_locked ? "bg-zinc-800 hover:bg-zinc-900 text-white" : "bg-red-50 hover:bg-red-100 text-red-600 border border-red-200"}`}
-                        onClick={() => toggleCompanyLock(company.id, company.is_locked)}
-                      >
-                        {company.is_locked ? <><Unlock className="h-4 w-4 mr-1"/> Unlock Account</> : <><Lock className="h-4 w-4 mr-1"/> Lock Account</>}
-                      </Button>
+                      {company.subscription_status === 'pending_approval' ? (
+                         <Button size="sm" className="w-full bg-green-600 hover:bg-green-700 text-white font-bold" onClick={() => approveCompany(company.id)}>
+                           <CheckCircle className="h-4 w-4 mr-1" /> Approve & Start Trial
+                         </Button>
+                      ) : (
+                        <>
+                          <Button size="sm" variant="outline" className="flex-1 text-blue-600 border-blue-200 hover:bg-blue-50 bg-white min-w-[120px]" onClick={() => openAdminModal(company.id)}>
+                            <UserPlus className="h-4 w-4 mr-1" /> Add Admin
+                          </Button>
+                          <Button size="sm" variant="outline" className="flex-1 text-zinc-700 border-zinc-200 hover:bg-zinc-50 bg-white min-w-[120px]" onClick={() => viewCompanyVisitors(company.id, company.name)}>
+                            <Eye className="h-4 w-4 mr-1" /> View Data
+                          </Button>
+                          <Button 
+                            size="sm" 
+                            variant={company.is_locked ? "default" : "destructive"} 
+                            className={`w-full ${company.is_locked ? "bg-zinc-800 hover:bg-zinc-900 text-white" : "bg-red-50 hover:bg-red-100 text-red-600 border border-red-200"}`}
+                            onClick={() => toggleCompanyLock(company.id, company.is_locked)}
+                          >
+                            {company.is_locked ? <><Unlock className="h-4 w-4 mr-1"/> Unlock Account</> : <><Lock className="h-4 w-4 mr-1"/> Lock Account</>}
+                          </Button>
+                        </>
+                      )}
                     </div>
 
                   </div>
@@ -363,7 +446,6 @@ export default function ManageCompaniesPage() {
         </CardContent>
       </Card>
 
-      {/* --- ADD COMPANY MODAL --- */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <Card className="w-full max-w-md shadow-2xl relative border-0 overflow-hidden bg-white">
@@ -386,7 +468,7 @@ export default function ManageCompaniesPage() {
                     className="mt-1.5 h-11 bg-zinc-50 focus:bg-white focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
-                <div>
+                <div>     
                   <Label className="font-semibold text-zinc-700">Initial Subscription Plan</Label>
                   <select
                     value={planType}
@@ -409,7 +491,6 @@ export default function ManageCompaniesPage() {
         </div>
       )}
 
-      {/* --- ADD ADMIN MODAL --- */}
       {showAdminModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <Card className="w-full max-w-md shadow-2xl relative border-0 overflow-hidden bg-white">
@@ -443,7 +524,7 @@ export default function ManageCompaniesPage() {
                     onChange={(e) => setAdminForm({...adminForm, email: e.target.value})} 
                     className="mt-1.5 h-11 bg-zinc-50 focus:bg-white focus:ring-2 focus:ring-blue-600"
                   />
-                </div>
+                </div>   
                 <div>
                   <Label className="font-semibold text-zinc-700">Initial Password</Label>
                   <Input 
@@ -467,7 +548,6 @@ export default function ManageCompaniesPage() {
         </div>
       )}
 
-      {/* --- ENHANCED VIEW VISITORS MODAL --- */}
       {showVisitorsModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <Card className="w-full max-w-md shadow-2xl relative border-0 overflow-hidden bg-white">
@@ -487,15 +567,12 @@ export default function ManageCompaniesPage() {
                 </div>
               ) : (
                 <div className="space-y-6">
-                  {/* Main Stat */}
                   <div className="bg-white p-6 rounded-2xl border border-zinc-200 shadow-sm text-center">
                     <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1">Total Lifetime Visitors</p>
                     <div className="text-5xl font-black text-indigo-600 tracking-tighter">
                       {visitorStats.total.toLocaleString()}
                     </div>
                   </div>
-
-                  {/* Sub Stats Grid */}
                   <div className="grid grid-cols-3 gap-3">
                     <div className="bg-white p-4 rounded-xl border border-zinc-200 shadow-sm text-center flex flex-col items-center border-b-2 border-b-amber-400">
                       <div className="w-8 h-8 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center mb-2">

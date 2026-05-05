@@ -48,7 +48,7 @@ export default function AdminDashboard() {
   const [isLocked, setIsLocked] = useState<boolean>(false);
 
   const [customFieldLabels, setCustomFieldLabels] = useState<Record<string, string>>({});
-  
+   
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [gateFilter, setGateFilter] = useState("all"); 
@@ -94,65 +94,21 @@ export default function AdminDashboard() {
         return;
       }
 
-      // --- 1. REPLICATE THE EXACT SAME BILLING CHECK TO PREVENT DATA LEAKAGE ---
       const { data: company } = await supabase
         .from("companies")
-        .select("is_locked, custom_fields, created_at")
+        .select("is_locked, custom_fields")
         .eq("id", profile.company_id)
         .single();
 
-      let countStartDate = company?.created_at || new Date(0).toISOString();
-      let lastPaymentDate = company?.created_at || new Date(0).toISOString();
-
-      const { data: recentTx } = await supabase
-        .from("transactions")
-        .select("created_at, status")
-        .eq("company_id", profile.company_id)
-        .order("created_at", { ascending: false })
-        .limit(10); 
-
-      if (recentTx && recentTx.length > 0) {
-        const lastPaid = recentTx.find(tx => 
-          tx.status && (tx.status.toUpperCase() === 'COMPLETED' || tx.status.toUpperCase() === 'SUCCESS' || tx.status.toUpperCase() === 'PAID')
-        );
-
-        if (lastPaid) {
-          countStartDate = lastPaid.created_at;
-          lastPaymentDate = lastPaid.created_at;
-        }
-      }
-
-      const { count } = await supabase
-        .from("visitors")
-        .select("*", { count: "exact", head: true })
-        .eq("company_id", profile.company_id)
-        .gte("created_at", countStartDate);
-
-      const calculatedAmountDue = (count || 0) * 3;
-
-      const thirtyDaysAgo = new Date();
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-
-      // Only lock if they OWE money AND it's been more than 30 days
-      let accountLocked = company?.is_locked === true;
-      const isOverdue = new Date(lastPaymentDate) < thirtyDaysAgo;
-
-      if (calculatedAmountDue > 0 && isOverdue) {
-        accountLocked = true;
-      }
-
+      // Only lock if the Superadmin explicitly locked the account in the database
+      const accountLocked = company?.is_locked === true;
       setIsLocked(accountLocked);
 
       // --- IMPENETRABLE SECURITY BLOCK ---
-      // If the account is locked, we HALT the function here. 
-      // The massive 2000-row visitor query will NEVER fire. 
-      // It is impossible to bypass this with DevTools because the data isn't fetched.
       if (accountLocked) {
         setLoading(false);
         return;
       }
-
-      // --- IF WE REACH HERE, THE ACCOUNT IS PAID IN FULL & UNLOCKED ---
 
       if (company?.custom_fields) {
         const labelMap: Record<string, string> = {};
@@ -173,7 +129,7 @@ export default function AdminDashboard() {
         console.error("Error fetching gates:", error);
       }
 
-      // Fetch Visitors (Only runs if Unlocked)
+      // Fetch Visitors
       const { data: visitorData, error: visitorError } = await supabase
         .from("visitors")
         .select("*")
@@ -225,10 +181,9 @@ export default function AdminDashboard() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []); // isLocked is removed from dependency array to prevent infinite loop
+  }, [isLocked]); 
 
   // --- HARD RENDER BLOCK ---
-  // If the account is locked, we return nothing. The Layout component renders the lock screen popup instead.
   if (isLocked) {
     return null;
   }
@@ -301,7 +256,7 @@ export default function AdminDashboard() {
       const timeIn = new Date(v.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const timeOut = v.checked_out_at ? new Date(v.checked_out_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "--";
       const gateName = getGateName(v.gate_id);
-
+      
       const standardData = [
         `"${date}"`,
         `"${v.name}"`,
@@ -362,7 +317,7 @@ export default function AdminDashboard() {
             </Button>
           </div>
         </div>
-
+        
         {/* Analytics Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
           <Card className="border-t-4 border-t-blue-600 shadow-sm">
@@ -404,7 +359,7 @@ export default function AdminDashboard() {
               </div>
             </CardContent>
           </Card>
-        </div>
+        </div> 
 
         {/* Master Log Table */}
         <Card className="shadow-sm">
@@ -492,7 +447,7 @@ export default function AdminDashboard() {
               </div>
             </div>
           </CardHeader>
-
+          
           <CardContent className="p-0 sm:p-6 sm:pt-0">
             {loading ? (
               <p className="text-zinc-500 py-6 text-center">Loading reports...</p>
@@ -564,8 +519,7 @@ export default function AdminDashboard() {
                                 <DoorOpen className="h-3 w-3" />
                                 {getGateName(visitor.gate_id)}
                              </span>
-                          </TableCell>
-
+                          </TableCell>                 
                           <TableCell className="whitespace-nowrap">
                             {visitor.status === "pending" && <span className="text-amber-600 text-xs font-bold uppercase">Pending</span>}
                             {visitor.status === "checked_in" && <span className="text-green-600 text-xs font-bold uppercase">Inside</span>}
@@ -630,8 +584,7 @@ export default function AdminDashboard() {
                   <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1">Vehicle Registration</p>
                   <p className="font-mono font-medium text-zinc-900 text-lg leading-snug">{infoModalVisitor.vehicle_reg}</p>
                 </div>
-              )}
-
+              )} 
               {/* DYNAMIC CUSTOM FIELDS */}
               {infoModalVisitor.custom_data && Object.entries(infoModalVisitor.custom_data).map(([fieldId, value]) => {
                 if (!value.trim()) return null; // Don't show empty fields

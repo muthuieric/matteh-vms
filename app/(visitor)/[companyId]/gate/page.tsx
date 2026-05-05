@@ -65,6 +65,7 @@ function CheckInFormContent() {
   const [isScanning, setIsScanning] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // NEW: Terms and Conditions State
   const [agreedToTerms, setAgreedToTerms] = useState(false);
 
   useEffect(() => {
@@ -93,12 +94,17 @@ function CheckInFormContent() {
         return;
       }
 
-      const isExpired = company.subscription_ends_at ? new Date(company.subscription_ends_at) < new Date() : false;
-      if (company.is_locked || isExpired) {
+      // --- TEMPORARILY PAUSED SUBSCRIPTION EXPIRATION LOGIC ---
+      // We are commenting this out so manual payments don't block the system.
+      // const isExpired = company.subscription_ends_at ? new Date(company.subscription_ends_at) < new Date() : false;
+      
+      // Now it ONLY checks the manual toggle from your Super Admin dashboard
+      if (company.is_locked /* || isExpired */) {
         setAccessDenied(true);
         setLoading(false);
         return;
       }
+      // ---------------------------------------------------------
 
       setCompanyName(company.name);
       setRules({
@@ -153,27 +159,30 @@ function CheckInFormContent() {
 
     try {
       const compressedFile = await compressImage(file);
+      const reader = new FileReader();
+      reader.readAsDataURL(compressedFile);
       
-      const formDataPayload = new FormData();
-      formDataPayload.append("file", compressedFile);
+      reader.onloadend = async () => {
+        const base64data = reader.result;
+        const response = await fetch("/api/ocr", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ imageBase64: base64data }),
+        });
 
-      const response = await fetch("/api/ocr", {
-        method: "POST",
-        body: formDataPayload,
-      });
+        const result = await response.json();
 
-      const result = await response.json();
-
-      if (result.success && result.data) {
-        setNewVisitor((prev) => ({
-          ...prev,
-          name: result.data.name || prev.name,
-          id_number: result.data.id_number || prev.id_number,
-        }));
-      } else {
-        alert("Could not read the ID clearly. Please type it manually.");
-      }
-      setIsScanning(false);
+        if (result.success && result.data) {
+          setNewVisitor((prev) => ({
+            ...prev,
+            name: result.data.FullName || prev.name,
+            id_number: result.data.IDNumber || prev.id_number,
+          }));
+        } else {
+          alert("Could not read the ID clearly. Please type it manually.");
+        }
+        setIsScanning(false);
+      };
     } catch (error) {
       console.error(error);
       setIsScanning(false);
@@ -208,6 +217,7 @@ function CheckInFormContent() {
         finalPhone = newVisitor.phone.startsWith('+') ? newVisitor.phone : `+${newVisitor.phone}`;
       }
 
+      // 1. ROBUST BLACKLIST SECURITY CHECK
       const redFlagsRes = await fetch(`/api/red-flags?company_id=${companyId}`);
       if (redFlagsRes.ok) {
         const redFlagsJson = await redFlagsRes.json();
@@ -239,6 +249,7 @@ function CheckInFormContent() {
         }
       }
 
+      // 2. Upload Selfie
       if (selfieFile) {
         const compressedFile = await compressImage(selfieFile);
         
@@ -259,7 +270,7 @@ function CheckInFormContent() {
         }
       }
 
-      // 1. Submit Visitor to Supabase Database
+      // 3. Insert Visitor Record
       const { error } = await supabase.from("visitors").insert([
         {
           company_id: companyId,
@@ -280,24 +291,6 @@ function CheckInFormContent() {
 
       if (error) throw error;
 
-     // 2. TRIGGER EMAIL NOTIFICATION TO HOST (Fire-and-forget so UI doesn't freeze)
-     if (rules.askHost && newVisitor.host_id) {
-      const selectedHost = hosts.find((h) => h.id === newVisitor.host_id);
-      if (selectedHost && selectedHost.email) {
-        fetch("/api/notify-host", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            hostEmail: selectedHost.email,
-            hostName: selectedHost.name,
-            visitorName: newVisitor.name,
-            visitorPhone: finalPhone, // <-- We added this line!
-            companyName: companyName,
-            purpose: newVisitor.purpose || "Meeting/Visit"
-          }),
-        }).catch((err) => console.error("Failed to trigger host email:", err));
-      }
-    }
       setSubmitted(true);
 
     } catch (err: any) {
@@ -340,7 +333,7 @@ function CheckInFormContent() {
           <CheckCircle2 className="w-20 h-20 text-green-500 mx-auto mb-6" />
           <CardTitle className="text-2xl font-black text-zinc-900 tracking-tight mb-2">Registration Sent!</CardTitle>
           <p className="text-zinc-500 font-medium leading-relaxed">
-            Your details have been securely transmitted to the security desk. <strong className="text-zinc-900">Please wait for the guard to approve your entry.</strong>
+            Your details have been securely transmitted. <strong className="text-zinc-900">Please wait for the security guard to approve your entry.</strong>
           </p>
         </Card>
       </div>
@@ -382,8 +375,8 @@ function CheckInFormContent() {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <Label className="mb-1 block font-semibold text-zinc-700">Full ID Name <span className="text-red-500">*</span></Label>
-            <Input required value={newVisitor.name} onChange={(e) => setNewVisitor({...newVisitor, name: e.target.value})} placeholder="e.g. John Doe" className="h-12 bg-zinc-50" autoComplete="name" />
+            <Label className="mb-1 block font-semibold text-zinc-700">Full Name <span className="text-red-500">*</span></Label>
+            <Input required value={newVisitor.name} onChange={(e) => setNewVisitor({...newVisitor, name: e.target.value})} placeholder="e.g. John Doe" className="h-12 bg-zinc-50" />
           </div>
 
           {rules.askPhone && (
@@ -393,18 +386,13 @@ function CheckInFormContent() {
                 country="ke" 
                 value={newVisitor.phone} 
                 onChange={phone => setNewVisitor({ ...newVisitor, phone })} 
-                inputProps={{
-                  name: 'phone',
-                  required: true,
-                  autoComplete: 'tel' 
-                }}
                 inputClass="!w-full !h-12 !text-zinc-900 !bg-zinc-50 !rounded-md !border !border-zinc-300 focus:!ring-2 focus:!ring-blue-600 px-3" 
                 containerClass="w-full" 
                 buttonClass="!border-zinc-300 !bg-zinc-50 !rounded-l-md hover:!bg-zinc-100"
               />
             </div>
           )}
-             
+
           {rules.askId && (
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -420,15 +408,14 @@ function CheckInFormContent() {
                 </select>
               </div>
               <div>
+                {/* CHANGED: Now required and visually indicated */}
                 <Label className="mb-1 block font-semibold text-zinc-700">ID Number <span className="text-red-500">*</span></Label>
                 <Input 
                   required
-                  name="id_number"
                   value={newVisitor.id_number} 
                   onChange={(e) => setNewVisitor({...newVisitor, id_number: e.target.value})} 
                   placeholder="Enter ID Number" 
                   className="h-12 bg-zinc-50"
-                  autoComplete="on"
                 />
               </div>
             </div>
@@ -504,7 +491,6 @@ function CheckInFormContent() {
                 onChange={(e) => setNewVisitor({...newVisitor, vehicle_reg: e.target.value})} 
                 placeholder="e.g. KCA 123A (Leave blank if walk-in)" 
                 className="h-12 bg-zinc-50 uppercase"
-                autoComplete="on"
               />
             </div>
           )}
@@ -569,6 +555,7 @@ function CheckInFormContent() {
             </div>
           )}
 
+          {/* NEW: Terms and Conditions Checkbox Area */}
           <div className="space-y-3 pt-4 border-t border-zinc-200">
             <div className="text-xs text-zinc-500 h-24 overflow-y-auto p-3 bg-zinc-50 border border-zinc-200 rounded-md leading-relaxed shadow-inner">
               <p className="font-bold mb-1 text-zinc-700">Terms and Conditions of Entry</p>

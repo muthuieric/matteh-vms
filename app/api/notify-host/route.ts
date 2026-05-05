@@ -5,8 +5,18 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 
 export async function POST(request: Request) {
   try {
-    // We added visitorPhone to the incoming data
-    const { hostEmail, hostName, visitorName, visitorPhone, companyName, purpose } = await request.json();
+    // We added visitorPhoto, companyId, and otpCode so we can show them in the email
+    const { 
+      hostEmail, 
+      hostName, 
+      visitorName, 
+      visitorPhone, 
+      companyName, 
+      purpose,
+      visitorPhoto,
+      companyId,
+      otpCode
+    } = await request.json();
 
     if (!hostEmail) {
       return NextResponse.json({ error: "No host email provided." }, { status: 400 });
@@ -23,14 +33,19 @@ export async function POST(request: Request) {
           <p>You have a visitor waiting at the security gate for <strong>${companyName}</strong>.</p>
           
           <div style="background: #f4f4f5; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #2563eb;">
+            
+            ${visitorPhoto ? `<img src="${visitorPhoto}" alt="Visitor Photo" style="width: 80px; height: 80px; border-radius: 50%; object-fit: cover; margin-bottom: 15px; border: 2px solid #e4e4e7; display: block;" />` : ''}
+            
             <p style="margin: 0 0 10px 0;"><strong>Visitor Name:</strong> ${visitorName}</p>
             <p style="margin: 0 0 10px 0;"><strong>Phone Number:</strong> ${visitorPhone || 'Not provided'}</p>
-            <p style="margin: 0;"><strong>Stated Purpose:</strong> ${purpose}</p>
+            <p style="margin: 0 0 10px 0;"><strong>Stated Purpose:</strong> ${purpose}</p>
+            ${otpCode ? `<p style="margin: 0; color: #2563eb;"><strong>Gate Code:</strong> ${otpCode}</p>` : ''}
           </div>
           
           <p style="font-size: 14px; color: #71717a; margin-bottom: 0;">
-            The security team is currently processing their entry.
+            The security team has processed their entry.
           </p>
+
         </div>
       `,
     });

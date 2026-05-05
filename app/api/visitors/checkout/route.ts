@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 
 export async function POST(request: Request) {
   try {
-    const { companyId, otp } = await request.json();
+    const { companyId, otp, action } = await request.json();
 
     if (!companyId || !otp) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
@@ -33,7 +33,12 @@ export async function POST(request: Request) {
 
     const activeVisitor = visitors[0];
 
-    // 2. Check them out by updating status AND the checkout timestamp
+    // --- STEP 1: If the UI is just verifying, return the details ---
+    if (action === "verify") {
+      return NextResponse.json({ success: true, visitor: activeVisitor });
+    }
+
+    // --- STEP 2: If the UI is confirming checkout, update the database ---
     const { error: updateError } = await supabaseAdmin
       .from("visitors")
       .update({
@@ -44,7 +49,7 @@ export async function POST(request: Request) {
 
     if (updateError) throw updateError;
 
-    return NextResponse.json({ success: true, message: "Checked out successfully" });
+    return NextResponse.json({ success: true, message: "Checked out successfully", visitorName: activeVisitor.name });
 
   } catch (error: any) {
     console.error("Checkout API Error:", error);
