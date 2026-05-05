@@ -29,7 +29,7 @@ export default function NotFound() {
         </h2>
         
         <p className="text-lg text-zinc-500 font-medium max-w-md mx-auto mb-10 leading-relaxed">
-          The page you are looking for has been moved, deleted, or you don't have the proper clearance to access this sector.
+          The page you are looking for has been moved, deleted, or you does not have the proper clearance to access this sector.
         </p>
 
         {/* Return Button */}
