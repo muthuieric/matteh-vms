@@ -291,6 +291,33 @@ function CheckInFormContent() {
 
       if (error) throw error;
 
+      // 4. NEW FIX: Notify the host if a host was selected
+      if (rules.askHost && newVisitor.host_id) {
+        const selectedHost = hosts.find((h) => h.id === newVisitor.host_id);
+        
+        if (selectedHost && selectedHost.email) {
+          try {
+            await fetch('/api/notify-host', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                hostEmail: selectedHost.email,
+                hostName: selectedHost.name,
+                visitorName: newVisitor.name,
+                visitorPhone: finalPhone || 'Not provided',
+                companyName: companyName,
+                purpose: newVisitor.purpose || 'Not stated',
+                visitorPhoto: uploadedPhotoUrl,
+                companyId: companyId
+              })
+            });
+          } catch (notifyError) {
+            console.error("Failed to trigger host notification:", notifyError);
+            // Non-blocking error, user still sees success screen
+          }
+        }
+      }
+
       setSubmitted(true);
 
     } catch (err: any) {
@@ -408,7 +435,6 @@ function CheckInFormContent() {
                 </select>
               </div>
               <div>
-                {/* CHANGED: Now required and visually indicated */}
                 <Label className="mb-1 block font-semibold text-zinc-700">ID Number <span className="text-red-500">*</span></Label>
                 <Input 
                   required
