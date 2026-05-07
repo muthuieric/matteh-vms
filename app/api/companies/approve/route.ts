@@ -2,18 +2,16 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { Resend } from "resend";
 
-// It is safer to initialize Supabase inside the function as well to prevent build crashes!
 export async function POST(request: Request) {
   try {
-    // --- THE FIX: We moved these INSIDE the POST function ---
-    // Now Vercel's build scanner will completely ignore them during deployment!
+    // 🚨 THE FIX: Initialize these INSIDE the POST function.
+    // This forces Next.js to read your .env.local file at the exact moment the API is called, 
+    // rather than at server boot time when the keys might be temporarily undefined.
     const supabaseAdmin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL || "dummy_url",
-      process.env.SUPABASE_SERVICE_ROLE_KEY || "dummy_key"
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
     );
-    
-    const resend = new Resend(process.env.RESEND_API_KEY || "re_dummy");
-    // --------------------------------------------------------
+    const resend = new Resend(process.env.RESEND_API_KEY!);
 
     const { companyId } = await request.json();
 

@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
 import { Resend } from 'resend';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
-
 export async function POST(request: Request) {
   try {
-    // We added visitorPhoto, companyId, and otpCode so we can show them in the email
+    const resend = new Resend(process.env.RESEND_API_KEY!);
+
+    // Removed otpCode since the host doesn't need the visitor's gate code
     const { 
       hostEmail, 
       hostName, 
@@ -14,16 +14,15 @@ export async function POST(request: Request) {
       companyName, 
       purpose,
       visitorPhoto,
-      companyId,
-      otpCode
+      companyId
     } = await request.json();
 
     if (!hostEmail) {
       return NextResponse.json({ error: "No host email provided." }, { status: 400 });
     }
 
-    // Attempt to send email
-    const data = await resend.emails.send({
+    // Attempt to send email - FIX: Correctly destructure both data AND error from Resend
+    const { data, error } = await resend.emails.send({
       from: 'matteh-vms Security <onboarding@resend.dev>', 
       to: [hostEmail],
       subject: `Arrival Alert: ${visitorName} is here to see you`,
@@ -39,7 +38,6 @@ export async function POST(request: Request) {
             <p style="margin: 0 0 10px 0;"><strong>Visitor Name:</strong> ${visitorName}</p>
             <p style="margin: 0 0 10px 0;"><strong>Phone Number:</strong> ${visitorPhone || 'Not provided'}</p>
             <p style="margin: 0 0 10px 0;"><strong>Stated Purpose:</strong> ${purpose}</p>
-            ${otpCode ? `<p style="margin: 0; color: #2563eb;"><strong>Gate Code:</strong> ${otpCode}</p>` : ''}
           </div>
           
           <p style="font-size: 14px; color: #71717a; margin-bottom: 0;">
@@ -50,10 +48,16 @@ export async function POST(request: Request) {
       `,
     });
 
+    // 🚨 THE REAL FIX: Check if Resend actually rejected the email
+    if (error) {
+      console.error("Resend API Error details:", error);
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
     return NextResponse.json({ success: true, data });
 
-  } catch (error) {
-    console.error("Email API Error:", error);
+  } catch (error: any) {
+    console.error("Server Error:", error);
     return NextResponse.json({ error: "Failed to send notification email." }, { status: 500 });
   }
 }
