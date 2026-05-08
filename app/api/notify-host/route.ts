@@ -5,7 +5,7 @@ export async function POST(request: Request) {
   try {
     const resend = new Resend(process.env.RESEND_API_KEY!);
 
-    // Removed otpCode since the host doesn't need the visitor's gate code
+    // We no longer expect visitorId or origin from the frontend
     const { 
       hostEmail, 
       hostName, 
@@ -21,7 +21,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "No host email provided." }, { status: 400 });
     }
 
-    // Attempt to send email - FIX: Correctly destructure both data AND error from Resend
+    // THIS FIXES THE "UNDEFINED" ISSUE:
+    // It automatically reads your website URL (e.g. http://localhost:3000 or your live domain)
+    const requestUrl = new URL(request.url);
+    const origin = requestUrl.origin; 
+    
+    // Creates exactly the link you wanted: http://localhost:3000/[companyId]/host-confirm
+    const confirmLink = `${origin}/${companyId}/host-confirm`;
+
     const { data, error } = await resend.emails.send({
       from: 'matteh-vms Security <onboarding@resend.dev>', 
       to: [hostEmail],
@@ -40,15 +47,23 @@ export async function POST(request: Request) {
             <p style="margin: 0 0 10px 0;"><strong>Stated Purpose:</strong> ${purpose}</p>
           </div>
           
-          <p style="font-size: 14px; color: #71717a; margin-bottom: 0;">
-            The security team has processed their entry.
+          <div style="margin: 30px 0;">
+            <p style="font-size: 14px; color: #52525b; margin-bottom: 10px;">When the visitor arrives, please ask them for the <strong>OTP code</strong> they received at the gate.</p>
+            <p style="font-size: 14px; color: #52525b; margin-bottom: 5px;">Click the link below to enter their code and confirm their visit:</p>
+            
+            <!-- THIS IS THE PLAIN LINK YOU REQUESTED -->
+            <a href="${confirmLink}" style="color: #2563eb; font-weight: bold; font-size: 16px; word-break: break-all;">
+              ${confirmLink}
+            </a>
+          </div>
+          
+          <p style="font-size: 12px; color: #71717a; margin-bottom: 0;">
+            If you are not expecting this visitor, please contact security.
           </p>
-
         </div>
       `,
     });
 
-    // 🚨 THE REAL FIX: Check if Resend actually rejected the email
     if (error) {
       console.error("Resend API Error details:", error);
       return NextResponse.json({ error: error.message }, { status: 500 });
