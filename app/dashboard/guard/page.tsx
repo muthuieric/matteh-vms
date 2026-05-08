@@ -15,7 +15,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { X, UserCircle, LogOut, Search, Clock, CheckCircle2, UserPlus, Info, DoorOpen, QrCode, Printer } from "lucide-react";
+import { X, UserCircle, LogOut, Search, Clock, CheckCircle2, UserPlus, Info, DoorOpen, QrCode, Printer, ShieldCheck } from "lucide-react";
 
 // Import the modal component for manual registration
 import AddVisitorModal from "@/components/AddVisitorModal";
@@ -33,6 +33,7 @@ type Visitor = {
   company_id: string;
   photo_url?: string;
   host_name?: string;
+  host_confirmed?: boolean; // NEW: Added host_confirmed
   purpose?: string;
   vehicle_reg?: string;
   custom_data?: Record<string, string>; // Holds dynamic form answers
@@ -195,6 +196,11 @@ export default function GuardDashboard() {
                   prev.map((v) => (v.id === payload.new.id ? (payload.new as Visitor) : v))
                 );
               }
+              
+              // Update modal if the updated visitor is currently being viewed
+              setInfoModalVisitor((prev) => 
+                prev?.id === payload.new.id ? (payload.new as Visitor) : prev
+              );
             } else if (payload.eventType === "DELETE") {
               setVisitors((prev) => prev.filter((v) => v.id !== payload.old.id));
             }
@@ -647,6 +653,25 @@ export default function GuardDashboard() {
                   <p className="font-medium text-zinc-900 text-lg leading-snug">{infoModalVisitor.host_name}</p>
                 </div>
               )}
+
+              {/* HOST STATUS INDICATOR (NEW) */}
+              {infoModalVisitor.host_name && (
+                <div>
+                  <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1">Host Status</p>
+                  {infoModalVisitor.host_confirmed ? (
+                    <div className="flex items-center text-green-600 font-semibold text-base mt-1">
+                      <ShieldCheck className="w-5 h-5 mr-1.5" /> 
+                      Host confirmed arrival
+                    </div>
+                  ) : (
+                    <div className="flex items-center text-amber-600 font-medium text-base mt-1">
+                      <Clock className="w-5 h-5 mr-1.5" /> 
+                      Pending host confirmation
+                    </div>
+                  )}
+                </div>
+              )}
+
               {infoModalVisitor.purpose && (
                 <div>
                   <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1">Purpose of Visit</p>

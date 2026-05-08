@@ -403,13 +403,14 @@ function CheckInFormContent() {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <Label className="mb-1 block font-semibold text-zinc-700">Full Name <span className="text-red-500">*</span></Label>
-            <Input required value={newVisitor.name} onChange={(e) => setNewVisitor({...newVisitor, name: e.target.value})} placeholder="e.g. John Doe" className="h-12 bg-zinc-50" />
+            <Input required value={newVisitor.name} onChange={(e) => setNewVisitor({...newVisitor, name: e.target.value})} placeholder="e.g. John Doe" className="h-12 bg-zinc-50" autoComplete="name"/>
           </div>
 
           {rules.askPhone && (
             <div>
               <Label className="mb-1 block font-semibold text-zinc-700">Phone Number <span className="text-red-500">*</span></Label>
               <PhoneInput 
+                 inputProps={{ autoComplete: 'tel' }}
                 country="ke" 
                 value={newVisitor.phone} 
                 onChange={phone => setNewVisitor({ ...newVisitor, phone })} 
@@ -442,6 +443,7 @@ function CheckInFormContent() {
                   onChange={(e) => setNewVisitor({...newVisitor, id_number: e.target.value})} 
                   placeholder="Enter ID Number" 
                   className="h-12 bg-zinc-50"
+                  autoComplete="id number"
                 />
               </div>
             </div>
